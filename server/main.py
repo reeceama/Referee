@@ -31,6 +31,7 @@ import bib
 import statements
 from meetings import Meetings
 from ai_log import AILog
+from notes import Notes
 import todoist
 import code_folder as code_check
 import api_key
@@ -56,6 +57,7 @@ def forget_expired_reading():
     while True:
         for url in expired(time.time() - reading.keep_minutes * 60):
             claim_log.forget(url)
+            notes.forget_source(url)
             forget(url)
         time.sleep(60)
 
@@ -353,6 +355,9 @@ def check(req: CheckRequest):
         return {"match": False}
     claim_log.record(sentence, verdict, project, req.document)  # for the library and reports
     if verdict.get("label") == "supports" and verdict.get("source", {}).get("url"):
+        # Supported from a page with no reading note, in a project that uses notes: a nudge.
+        verdict["noted"] = notes.noted(verdict["source"]["url"], verdict.get("page"), project)
+    if verdict.get("label") == "supports" and verdict.get("source", {}).get("url"):
         keep(verdict["source"]["url"])  # cited sources are kept automatically
     # verdict includes "label": "supports" or "contradicts" - Word handles both
     return {"match": True, **verdict}
@@ -361,10 +366,32 @@ def check(req: CheckRequest):
 @app.post("/statement")
 def check_statement(req: StatementRequest):
     # A theorem or definition taken from a paper, compared with the paper itself.
-    return statements.check(req.statement, req.kind, req.keys, req.label)
+    result = statements.check(req.statement, req.kind, req.keys, req.label)
+    if result.get("found") and result.get("source", {}).get("url"):
+        # Cited from a page with no note: worth a nudge to check it's been read.
+        result["noted"] = notes.noted(result["source"]["url"], result.get("page"), reading.project or "")
+    return result
 
 
 meetings = Meetings(paths.data("meetings.json"))
+
+
+notes = Notes(paths.data("notes.json"))
+
+
+@app.get("/notes")
+def list_notes(project: str = "all"):
+    return notes.all(library_project(project))
+
+
+@app.post("/notes")
+def save_note(note: dict):
+    return notes.save(note)
+
+
+@app.delete("/notes")
+def delete_note(id: str):
+    return {"ok": notes.delete(id)}
 
 
 todoist_sync = todoist.Sync(meetings)
@@ -592,6 +619,7 @@ def list_sources():
 @app.delete("/sources")
 def forget_source(url: str):
     claim_log.forget(url)
+    notes.forget_source(url)
     highlights.forget(url)
     return {"ok": True, "removed": forget(url)}
 
@@ -602,6 +630,7 @@ def forget_temporary():
     urls = expired(time.time() + 1)
     for url in urls:
         claim_log.forget(url)
+        notes.forget_source(url)
         forget(url)
     return {"ok": True, "forgotten": len(urls)}
 
@@ -623,6 +652,7 @@ def rename_project_route(req: RenameRequest):
     rename_project(req.old, new or None)
     claim_log.rename_project(req.old, new or None)
     meetings.rename_project(req.old, new or None)
+    notes.rename_project(req.old, new or None)
     ai_log.rename_project(req.old, new or None)
     return reading.rename(req.old, new)
 

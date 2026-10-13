@@ -152,7 +152,7 @@ class Sync:
                     if action.get("done") or not is_mine(action.get("who", ""), name):
                         continue
                     body = {"content": action["text"],
-                            "description": f"From {meeting.get('title') or 'a meeting'} ({meeting.get('date')}), in Referee.",
+                            "description": f"From {meeting.get('title') or 'a meeting'} ({meeting.get('date')}): referee://meeting/{meeting['id']}",
                             "project_id": self._project(key, meeting.get("project") or "Referee")}
                     if due:
                         body["due_string"] = due

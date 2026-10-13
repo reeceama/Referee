@@ -51,6 +51,22 @@ final class MeetingsModel: ObservableObject {
     @Published var workspace = ""            // the filtered project's shared workspace folder, if linked
     private var current = ""                 // the current project, for new meetings
     private var pending: Task<Void, Never>?
+    private var linked: NSObjectProtocol?
+
+    init() {
+        // referee://meeting/<id> links: show every project's meetings, with that one selected.
+        linked = NotificationCenter.default.addObserver(forName: .refereeShowMeeting, object: nil, queue: .main) { [weak self] note in
+            guard let id = note.object as? String else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                if !self.meetings.contains(where: { $0.id == id }) {
+                    self.filter = "all"
+                    await self.reload()
+                }
+                self.selected = id
+            }
+        }
+    }
 
     func load() {
         Task {
@@ -258,6 +274,7 @@ struct MeetingEditor: View {
     @ObservedObject var model: MeetingsModel
     @State var meeting: Meeting
     @Binding var armed: Bool
+    @State private var copied = false
 
     private var date: Binding<Date> {
         Binding(get: {
@@ -318,6 +335,13 @@ struct MeetingEditor: View {
                     Button("Add Action Point") { meeting.actions.append(Meeting.Action()) }.glassButton()
                 }
                 HStack {
+                    Button(copied ? "Copied" : "Copy Link") {
+                        RefereeLinks.copy(RefereeLinks.meeting(meeting.id))
+                        copied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy a link to this meeting, for your planner or to-do list")
                     Spacer()
                     Button(armed ? "Click Again to Delete" : "Delete Meeting") {
                         if armed { model.delete(meeting.id); armed = false } else {

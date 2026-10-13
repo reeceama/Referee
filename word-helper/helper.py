@@ -179,6 +179,9 @@ def notes_for(result: Dict, sentence: str = "") -> List[str]:
     year = re.match(r"\d{4}", str(source.get("date") or ""))
     if result["label"] == "supports" and year and time.localtime().tm_year - int(year.group()) > OLD_SOURCE_YEARS:
         notes.append(f"This source is from {year.group()}. Check whether newer evidence agrees.")
+    if result["label"] == "supports" and result.get("noted") is False:  # only in projects that use Notes
+        where = f"page {result['page']} of " if result.get("page") else ""
+        notes.append(f"Not in your notes: {where}{citations.clean_title(source)}. Worth noting once you've read it.")
     return [COMMENT_PREFIX + note for note in notes]
 
 

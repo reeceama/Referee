@@ -40,6 +40,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>com.reeceama.referee.link</string>
+    <key>CFBundleURLSchemes</key><array><string>referee</string></array>
+  </dict></array>
   <key>NSAppleEventsUsageDescription</key><string>Referee's Word helper checks and cites the document you're writing in Word.</string>
   <key>RefereeRepository</key><string>$REPO</string>
 </dict>

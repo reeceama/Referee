@@ -160,9 +160,13 @@
     if (result.reason === "not_saved") return [["warn", `Can't compare: ${keys.join(", ")} isn't saved in Referee. Save the paper to check your ${kind} against it.`]];
     if (result.reason === "no_api_key") return [["warn", "Add an API key in Referee's settings to compare statements with papers."]];
     if (!result.found) return [["warn", `Couldn't find this ${kind} in ${title(result.source)}. Check you're citing the right paper, or that the saved copy includes it.`]];
-    if (!result.differences?.length) return [["good", `Matches ${title(result.source)}.`]];
+    // From a page with no reading note: a nudge to check it's been read, not an error.
+    const unnoted = result.noted === false
+      ? [["quote", `Not in your notes${result.page ? `: page ${result.page} of ${title(result.source)}` : ""}. Worth noting once you've read it.`]]
+      : [];
+    if (!result.differences?.length) return [["good", `Matches ${title(result.source)}.`], ...unnoted];
     return result.differences.map((d) => [d.kind === "extra_condition" ? "warn" : "bad", `${KINDS[d.kind] || "Difference"}: ${d.detail}`])
-      .concat([["quote", `The paper (${name}${result.page ? `, p. ${result.page}` : ""}): ${result.quote}`]]);
+      .concat([["quote", `The paper (${name}${result.page ? `, p. ${result.page}` : ""}): ${result.quote}`]], unnoted);
   }
 
   const title = (source) => (source?.title || source?.url || "a source").replace(/\s+[-|–—]\s+[^-|–—]+$/, "");
@@ -185,6 +189,7 @@
       if (!keys.length) out.push(["good", `Supported by ${title(source)}. Cite it:`, key, null, null, true]);
       else if (key && !keys.includes(key)) out.push(["warn", `You cite ${keys.join(", ")}, but the reading that supports this is ${title(source)}.`, key]);
       else out.push(["good", `Supported by ${title(source)}${keys.length ? ", which you cite" : ""}.`]);
+      if (result.noted === false) out.push(["quote", `Not in your notes${result.page ? `: page ${result.page} of ${title(source)}` : ""}. Worth noting once you've read it.`]);
     }
     if (result.misquote) out.push(["warn", `This quotation doesn't match the source. It says: “${result.quote}”`]);
     if (result.too_close) out.push(["warn", "Very close to the source's wording. Consider quoting or rephrasing."]);

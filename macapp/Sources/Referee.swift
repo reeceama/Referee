@@ -339,6 +339,7 @@ struct MenuContent: View {
         Button("Remove Marks in Word") { WordSettings.removeMarks() }
         Button("Install Browser Extension…") { BrowserExtension.install(repo: repo) }
         Button("Open Library") { show("library") }
+        Button("Notes") { show("notes") }
         Button("Meetings") { show("meetings") }
         Button("AI Use") { show("ai-use") }
         Button("Settings…") { show("settings") }
@@ -655,7 +656,7 @@ struct SettingsView: View {
             }
             card(title: "Integrations", symbol: "puzzlepiece.extension") {
                 HStack(spacing: 12) {
-                    Text("Connect the services Referee works with: an AI provider for checking, and Todoist for your meeting action points.")
+                    Text("Connect Referee to the other services you use.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -703,6 +704,7 @@ struct SettingsView: View {
             // The other windows, on a row of their own so the header never squeezes them.
             HStack(spacing: 8) {
                 Button { Windows.open("library") } label: { Label("Library", systemImage: "books.vertical").fixedSize() }.glassButton()
+                Button { Windows.open("notes") } label: { Label("Notes", systemImage: "note.text").fixedSize() }.glassButton()
                 Button { Windows.open("meetings") } label: { Label("Meetings", systemImage: "person.2").fixedSize() }.glassButton()
                 Button { Windows.open("ai-use") } label: { Label("AI Use", systemImage: "checkmark.seal").fixedSize() }.glassButton()
                 Spacer()
@@ -950,7 +952,7 @@ struct TodoistView: View {
             window.makeKeyAndOrderFront(nil)
             return
         }
-        let view = id == "library" ? AnyView(LibraryView()) : id == "meetings" ? AnyView(MeetingsView()) : id == "ai-use" ? AnyView(AIUseView()) : id == "integrations" ? AnyView(IntegrationsView(model: .shared)) : AnyView(SettingsView(model: .shared))
+        let view = id == "library" ? AnyView(LibraryView()) : id == "meetings" ? AnyView(MeetingsView()) : id == "ai-use" ? AnyView(AIUseView()) : id == "integrations" ? AnyView(IntegrationsView(model: .shared)) : id == "notes" ? AnyView(NotesView()) : AnyView(SettingsView(model: .shared))
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarAppearsTransparent = true
@@ -1002,6 +1004,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // Clicking the app's icon again (in Applications, Spotlight or Launchpad) opens settings.
+    // referee:// links clicked in a planner, Todoist or anywhere else.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { RefereeLinks.handle(url) }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         Windows.open("settings")
         return true
@@ -1031,6 +1038,10 @@ struct RefereeApp: App {
         }
         Window("Library", id: "library") {
             LibraryView().background(WindowOpener())
+        }
+        .windowStyle(.hiddenTitleBar)
+        Window("Notes", id: "notes") {
+            NotesView().background(WindowOpener())
         }
         .windowStyle(.hiddenTitleBar)
         Window("Integrations", id: "integrations") {
