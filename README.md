@@ -21,6 +21,8 @@ The first version was built in one day for the Invisible AI hackathon on 10 Octo
 
 Referee checks your writing as you type in Word or Overleaf, and updates itself when a new release comes out. There's no Windows app yet; Windows users can run it from the code (see [Running it](#6-running-it)).
 
+See the [changelog](CHANGELOG.md) for what's new in each release.
+
 ## Team members
 
 - Reece Mings-Alleyne ([GitHub](https://github.com/reeceama) / [LinkedIn](https://www.linkedin.com/in/reece-mings-alleyne/))
@@ -225,6 +227,7 @@ Ignoring stock phrasing widened the margin more than five times. The chosen sett
 ├── .github/workflows/test.yml  runs the tests on Windows and macOS after every push
 │
 ├── README.md
+├── CHANGELOG.md                what changed in each release
 ├── LICENSE
 └── .gitignore
 ```
