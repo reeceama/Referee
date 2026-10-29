@@ -6,44 +6,62 @@ extension Notification.Name {
     static let researchChanged = Notification.Name("RefereeResearchChanged")
 }
 
-/// A global keyboard shortcut that switches research mode on or off from any app. Uses macOS's
-/// hotkey service, which needs no extra permissions. Saved as a key code and modifiers.
+/// Global keyboard shortcuts, one per action, that work from any app: research mode on or off,
+/// and removing Referee's marks in Word. Uses macOS's hotkey service, which needs no extra
+/// permissions. Each is saved as a key code and modifiers.
 @MainActor
 final class Shortcut: ObservableObject {
 
-    static let shared = Shortcut()
+    static let shared = Shortcut(id: 1, saved: "shortcut") { await Shortcut.toggleResearch() }
+    static let removeMarks = Shortcut(id: 2, saved: "removeMarksShortcut") { WordSettings.removeMarks(quietly: true) }
+    /// None is set until the person records one in Settings, so Referee never takes a shortcut
+    /// another app uses. Inside Referee, ⌘K opens search either way.
+    static let find = Shortcut(id: 3, saved: "findShortcut") { Floating.show("find", width: 900) { FindView() } }
+    static let capture = Shortcut(id: 4, saved: "captureShortcut") { Capture.show() }
+    static let all = [shared, removeMarks, find, capture]
 
     @Published private(set) var keyCode: UInt32? = nil
     @Published private(set) var modifiers: UInt32 = 0
+    private let id: UInt32
+    private let saved: String          // UserDefaults key prefix (the first shortcut keeps its old keys)
+    private let action: @MainActor () async -> Void
     private var hotKey: EventHotKeyRef?
-    private var installed = false
+    private static var installed = false
 
-    private init() {
+    private init(id: UInt32, saved: String, action: @escaping @MainActor () async -> Void) {
+        self.id = id
+        self.saved = saved
+        self.action = action
         let defaults = UserDefaults.standard
-        if defaults.object(forKey: "shortcutKey") != nil {
-            keyCode = UInt32(defaults.integer(forKey: "shortcutKey"))
-            modifiers = UInt32(defaults.integer(forKey: "shortcutModifiers"))
+        if defaults.object(forKey: "\(saved)Key") != nil {
+            keyCode = UInt32(defaults.integer(forKey: "\(saved)Key"))
+            modifiers = UInt32(defaults.integer(forKey: "\(saved)Modifiers"))
         }
     }
 
-    /// Called at launch: listen for the saved shortcut.
+    /// Called at launch: listen for every saved shortcut.
     func start() {
-        installHandler()
-        register()
+        Shortcut.installHandler()
+        for shortcut in Shortcut.all { shortcut.register() }
     }
 
-    func set(keyCode: UInt32, flags: NSEvent.ModifierFlags) {
+    /// Saves a shortcut, unless another action already has it. Returns whether it was saved.
+    @discardableResult
+    func set(keyCode: UInt32, flags: NSEvent.ModifierFlags) -> Bool {
+        let wanted = Shortcut.carbon(flags)
+        if Shortcut.all.contains(where: { $0 !== self && $0.keyCode == keyCode && $0.modifiers == wanted }) { return false }
         self.keyCode = keyCode
-        modifiers = Shortcut.carbon(flags)
-        UserDefaults.standard.set(Int(keyCode), forKey: "shortcutKey")
-        UserDefaults.standard.set(Int(modifiers), forKey: "shortcutModifiers")
+        modifiers = wanted
+        UserDefaults.standard.set(Int(keyCode), forKey: "\(saved)Key")
+        UserDefaults.standard.set(Int(modifiers), forKey: "\(saved)Modifiers")
         register()
+        return true
     }
 
     func clear() {
         keyCode = nil
-        UserDefaults.standard.removeObject(forKey: "shortcutKey")
-        UserDefaults.standard.removeObject(forKey: "shortcutModifiers")
+        UserDefaults.standard.removeObject(forKey: "\(saved)Key")
+        UserDefaults.standard.removeObject(forKey: "\(saved)Modifiers")
         register()
     }
 
@@ -61,16 +79,23 @@ final class Shortcut: ObservableObject {
     private func register() {
         if let hotKey { UnregisterEventHotKey(hotKey); self.hotKey = nil }
         guard let keyCode else { return }
-        let id = EventHotKeyID(signature: OSType(0x52464545), id: 1)  // "RFEE"
-        RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKey)
+        let hotKeyID = EventHotKeyID(signature: OSType(0x52464545), id: id)  // "RFEE"
+        RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKey)
     }
 
-    private func installHandler() {
+    /// One handler for every shortcut: it reads which one was pressed and runs its action.
+    private static func installHandler() {
         guard !installed else { return }
         installed = true
         var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-            Task { @MainActor in await Shortcut.toggleResearch() }
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var pressed = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                              nil, MemoryLayout<EventHotKeyID>.size, nil, &pressed)
+            let id = pressed.id
+            Task { @MainActor in
+                if let shortcut = Shortcut.all.first(where: { $0.id == id }) { await shortcut.action() }
+            }
             return noErr
         }, 1, &type, nil, nil)
     }
@@ -107,7 +132,7 @@ final class Shortcut: ObservableObject {
 /// ⌘, ⌥ or ⌃, so it can't take over ordinary typing.
 struct ShortcutRecorder: View {
 
-    @ObservedObject private var shortcut = Shortcut.shared
+    @ObservedObject var shortcut: Shortcut
     @State private var recording = false
     @State private var monitor: Any?
 
@@ -135,8 +160,7 @@ struct ShortcutRecorder: View {
             case 51, 117: shortcut.clear(); stop()            // Delete: remove
             default:
                 if flags.contains(.command) || flags.contains(.option) || flags.contains(.control) {
-                    shortcut.set(keyCode: UInt32(event.keyCode), flags: flags)
-                    stop()
+                    if shortcut.set(keyCode: UInt32(event.keyCode), flags: flags) { stop() } else { NSSound.beep() }  // taken by the other action
                 } else {
                     NSSound.beep()                            // needs ⌘, ⌥ or ⌃
                 }

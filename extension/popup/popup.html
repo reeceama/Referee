@@ -3,80 +3,81 @@
   <head>
     <meta charset="utf-8" />
     <style>
-      body { font-family: -apple-system, "Segoe UI", sans-serif; width: 300px; margin: 0; padding: 14px; color: #222; }
-      header { display: flex; justify-content: space-between; align-items: baseline; }
-      h1 { font-size: 16px; margin: 0 0 2px; }
-      .server { font-size: 11px; color: #888; }
-      .server[data-state="online"] { color: #2b7a4b; }
-      .server[data-state="offline"] { color: #c0392b; }
-      .tagline { font-size: 12px; color: #666; margin: 0 0 14px; }
-      .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 13px; }
-      select { font-size: 13px; }
-      #status { font-size: 12px; color: #111; margin: 4px 0 12px; min-height: 16px; }
-      #status.off { color: #888; }
-      button { width: 100%; padding: 8px; border: 0; border-radius: 6px; background: #111; color: white; font-size: 13px; cursor: pointer; }
-      button.quiet { margin-top: 6px; background: none; color: #888; font-size: 12px; text-decoration: underline; }
-      button.quiet[data-armed="yes"] { color: #c0392b; }
-      .switch { position: relative; width: 38px; height: 22px; }
+      /* The same design as Referee for Mac: a serif title, small capital labels, thin lines
+         rather than boxes, and blue for what you can do. Light and dark follow the system. */
+      :root {
+        color-scheme: light dark;
+        --text: #1d1d1f; --muted: #6e6e73; --faint: #aeaeb2; --line: rgba(0,0,0,.1); --field: rgba(0,0,0,.05);
+        --page: #ffffff; --bar: #ececec; --accent: #007aff; --good: #248a3d; --warn: #c93400; --bad: #d70015;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --text: #f5f5f7; --muted: #98989d; --faint: #636366; --line: rgba(255,255,255,.1); --field: rgba(255,255,255,.07);
+                --page: #212223; --bar: #2c2c2e; --accent: #0a84ff; --good: #30d158; --warn: #ff9f0a; --bad: #ff453a; }
+      }
+      /* Laid out like Referee for Mac: a header bar on top, then the content below it. */
+      body { font: 13px -apple-system, "Segoe UI", sans-serif; width: 340px; margin: 0; color: var(--text); background: var(--page); }
+      header { display: flex; justify-content: space-between; align-items: center; height: 46px; padding: 0 16px;
+               background: var(--bar); border-bottom: 1px solid var(--line); }
+      .brand { display: flex; align-items: center; gap: 8px; }
+      .brand img { width: 20px; height: 20px; border-radius: 5px; }
+      h1 { font-size: 14px; font-weight: 700; margin: 0; }
+      .content { padding: 12px 18px 16px; }
+      .project-title { font: 700 18px "New York", "Iowan Old Style", Georgia, serif; margin: 2px 0 2px; }
+      .server { font-size: 11px; color: var(--muted); }
+      .server[data-state="online"] { color: var(--good); }
+      .server[data-state="offline"] { color: var(--bad); }
+      .tagline { font-size: 12px; color: var(--muted); margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+      .row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+      select, input { font: inherit; color: var(--text); background: var(--field); border: 0; border-radius: 6px; padding: 4px 8px; }
+      #project { max-width: 160px; }
+      #status { font-size: 12px; margin: 10px 0; min-height: 16px; }
+      #status.off { color: var(--muted); }
+      button { width: 100%; padding: 8px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: 500 13px -apple-system, sans-serif; cursor: pointer; }
+      button.quiet { margin-top: 6px; background: none; color: var(--muted); font-size: 12px; font-weight: 400; }
+      button.quiet[data-armed="yes"] { color: var(--bad); }
+      .switch { position: relative; width: 34px; height: 20px; }
       .switch input { display: none; }
-      .slider { position: absolute; inset: 0; background: #ccc; border-radius: 22px; cursor: pointer; transition: 0.2s; }
-      .slider::before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: 0.2s; }
-      input:checked + .slider { background: #111; }
-      input:checked + .slider::before { transform: translateX(16px); }
-      h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin: 14px 0 6px; }
-      #saved-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: 180px; overflow-y: auto; }
-      #saved-list li { padding: 6px 0; border-bottom: 1px solid #eee; font-size: 12px; }
-      #saved-list .t { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      #saved-list .s { color: #888; font-size: 11px; }
-      #saved-list .s[data-status="saved"] { color: #2b7a4b; }
-      #saved-list .s[data-status="offline"], #saved-list .s[data-status="skipped"] { color: #c0392b; }
-      #project { max-width: 150px; font-size: 13px; }
+      .slider { position: absolute; inset: 0; background: var(--field); border-radius: 20px; cursor: pointer; transition: .2s; }
+      .slider::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; background: #fff; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: .2s; }
+      input:checked + .slider { background: var(--accent); }
+      input:checked + .slider::before { transform: translateX(14px); }
+      h2 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
+      #saved-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: 200px; overflow-y: auto; }
+      #saved-list li { position: relative; padding: 8px 76px 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+      #saved-list .t { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 14px "New York", "Iowan Old Style", Georgia, serif; }
+      #saved-list .t.temp { color: var(--muted); }
+      #saved-list li.group { padding: 12px 0 4px; border-bottom: 0; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+      #saved-list .s { color: var(--muted); font-size: 11px; }
+      #saved-list .s[data-status="saved"] { color: var(--good); }
+      #saved-list .s[data-status="offline"], #saved-list .s[data-status="skipped"] { color: var(--bad); }
+      /* Save and forget sit well apart, with large targets, so one isn't pressed for the other. */
+      #saved-list .actions { position: absolute; right: 0; top: 6px; display: flex; gap: 18px; }
+      #saved-list .actions button { width: 26px; height: 26px; padding: 0; border-radius: 6px; background: none; color: var(--faint); display: flex; align-items: center; justify-content: center; font-variant-emoji: text; }
+      #saved-list .keep-one:hover { color: var(--good); }
+      #saved-list .forget-one:hover { color: var(--bad); }
+      #saved-list .forget-one[data-armed="yes"] { color: #fff; background: var(--bad); }
       #save-later { margin: 0 0 4px; }
       .new-project { gap: 6px; }
       .new-project[hidden] { display: none; }  /* .row's flex would otherwise override hidden */
-      .new-project input { flex: 1; font-size: 13px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
-      .new-project button { width: auto; padding: 5px 10px; }
+      .new-project input { flex: 1; }
+      .new-project button { width: auto; padding: 5px 12px; }
       #save-result { margin: 2px 0 10px; min-height: 0; }
-      .tag.temp { background: #fff4e0; color: #8a5600; }
-      #search { width: 100%; box-sizing: border-box; font-size: 12px; padding: 5px 8px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 6px; }
-      #saved-list li { position: relative; padding-right: 76px; }
-      /* Save and forget sit well apart, with large targets, so one isn't pressed for the other. */
-      #saved-list .actions { position: absolute; right: 0; top: 4px; display: flex; gap: 18px; }
-      #saved-list .actions button { width: 26px; height: 26px; padding: 0; border-radius: 6px; background: none; display: flex; align-items: center; justify-content: center; }
-      #saved-list .keep-one, #saved-list .forget-one { color: #aaa; border: 0; font-variant-emoji: text; }
-      #saved-list .keep-one:hover { color: #2b7a4b; }
-      #saved-list .forget-one:hover { color: #c0392b; }
-      #saved-list .forget-one[data-armed="yes"] { color: #fff; background: #c0392b; }
-      .tags { display: flex; gap: 4px; margin-top: 2px; flex-wrap: wrap; }
-      .tag { font-size: 10px; padding: 0 5px; border-radius: 3px; background: #f0f0f0; color: #555; }
-      .tag.cited { background: #e7f3ec; color: #2b7a4b; }
-      .hint { font-size: 11px; color: #888; margin: -4px 0 10px; }
-      .empty { font-size: 12px; color: #888; margin: 0 0 12px; }
-      @media (prefers-color-scheme: dark) {
-        body { background: #1c1c1e; color: #e6e6e6; }
-        .tagline, .server, h2, .hint, .empty, #status.off, #saved-list .s { color: #9a9a9f; }
-        .server[data-state="online"], #saved-list .s[data-status="saved"] { color: #5cc58a; }
-        .server[data-state="offline"], #saved-list .s[data-status="offline"], #saved-list .s[data-status="skipped"] { color: #f07167; }
-        #status { color: #e6e6e6; }
-        select, #project, #search, .new-project input { background: #2c2c2e; color: #e6e6e6; border: 1px solid #3a3a3c; border-radius: 4px; }
-        button { background: #e6e6e6; color: #111; }
-        button.quiet, #saved-list .forget-one { background: none; color: #9a9a9f; }
-        #saved-list .keep-one { color: #9a9a9f; background: none; }
-        #saved-list .keep-one:hover { color: #5cc58a; }
-        .slider { background: #48484a; }
-        input:checked + .slider { background: #5cc58a; }
-        #saved-list li { border-bottom-color: #3a3a3c; }
-        .tag { background: #2c2c2e; color: #b0b0b5; }
-        .tag.cited { background: rgba(92, 197, 138, 0.15); color: #5cc58a; }
-        .tag.temp { background: rgba(240, 180, 80, 0.15); color: #f0b450; }
-      }
+      #search { width: 100%; box-sizing: border-box; margin-bottom: 4px; padding: 6px 8px; }
+      .tags { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
+      .tag { font-size: 10px; padding: 1px 6px; border-radius: 5px; background: var(--field); color: var(--muted); }
+      .tag.cited { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+      .tag.temp { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+      .hint { font-size: 11px; color: var(--muted); margin: 8px 0 10px; line-height: 1.45; }
+      .empty { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
     </style>
   </head>
   <body>
     <header>
-      <h1>Referee</h1>
+      <div class="brand"><img src="../icons/icon32.png" alt="" /><h1>Referee</h1></div>
       <span class="server" id="server" data-state="checking">Checking server…</span>
     </header>
+    <div class="content">
+    <div class="project-title" id="project-title"></div>
     <p class="tagline">Checks your writing against what you've read.</p>
 
     <div class="row">
@@ -126,6 +127,7 @@
 
     <button id="open-library">Open library</button>
     <button class="quiet" id="forget">Forget temporary pages</button>
+    </div>
     <script src="popup.js"></script>
   </body>
 </html>

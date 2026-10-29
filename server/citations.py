@@ -272,6 +272,52 @@ def article(style: str, source: Dict, number: Optional[int] = None) -> str:
     return f"{who} ({year}). {title}. {parts}. {link}".strip()
 
 
+def local_document(style: str, source: Dict, number: Optional[int] = None) -> str:
+
+    """
+    A document saved on this computer (lecture notes, a PDF someone sent): cited as a document, by its
+    author, title, publisher and year. A file:// path means nothing to a reader, so no link or access
+    date. The details come from the source, or from Citation Details in the Library.
+    """
+
+    names = _split_authors(source.get("author"))
+    title = clean_title(source)
+    d = _parse_date(source.get("date"))
+    year = d["year"] if d else None
+    publisher = source.get("site") or ""
+    if style == "harvard":
+        # With no author, the title leads: Title (Year) Publisher.
+        who = _list_authors(names, "", " and ") if names else ""
+        lead = f"{who} ({year or 'no date'}) {_end_stop(title)}" if who else f"{title} ({year or 'no date'})"
+        return f"{_end_stop(lead)} {_end_stop(publisher) if publisher else ''}".strip()
+    if style == "mla":
+        people = [_parse_name(n) for n in names]
+        who = f"{people[0]['last']}, {' '.join(people[0]['firsts'])}. " if len(people) == 1 and people[0]["firsts"] else ""
+        tail = ", ".join(v for v in [publisher, year] if v)
+        return f"{who}{_end_stop(title)} {_end_stop(tail) if tail else ''}".strip()
+    if style == "ieee":
+        who = f"{_initials_first(names)}, " if names else ""
+        rest = ", ".join(v for v in [publisher, year] if v)
+        return f"[{number}] {who}“{title},” {_end_stop(rest)}" if rest else f"[{number}] {who}“{_end_stop(title)}”"
+    if style == "chicago":
+        who = _end_stop(names[0]) + " " if names else ""
+        return f"{who}{year + '. ' if year else ''}{_end_stop(title)} {_end_stop(publisher) if publisher else ''}".strip()
+    if style == "vancouver":
+        people = [_parse_name(n) for n in names]
+        who = ", ".join(f"{p['last']} {''.join(f[0] for f in p['firsts'])}".strip() for p in people[:6])
+        where = "; ".join(v for v in [publisher, year] if v)
+        return f"{number}. {who + '. ' if who else ''}{title.rstrip('.')}. {where + '.' if where else ''}".strip()
+    if style == "ams":
+        who = f"{_initials_first(names)}, " if names else ""
+        return f"[{number}] {who}{_end_stop(', '.join(v for v in [title, publisher, year] if v))}"
+    # APA 7: Author. (Year). Title. Publisher.
+    # With no author, the title takes the author's place: Title. (Year). Publisher.
+    who = _list_authors(names, " ", ", & ") if names else ""
+    when = f"({year})." if year else "(n.d.)."
+    lead = [_end_stop(who), when, _end_stop(title)] if who else [_end_stop(title), when]
+    return " ".join(lead + ([_end_stop(publisher)] if publisher else []))
+
+
 def reference(style: str, source: Dict, number: Optional[int] = None) -> str:
 
     """
@@ -280,6 +326,8 @@ def reference(style: str, source: Dict, number: Optional[int] = None) -> str:
 
     if is_article(source):
         return article(style, source, number)
+    if (source.get("url") or "").startswith("file://"):
+        return local_document(style, source, number)
 
     names = _split_authors(source.get("author"))
     title = clean_title(source)

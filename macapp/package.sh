@@ -3,7 +3,7 @@
 # libraries, and the browser extension folder inside, so nothing else needs installing.
 # Output: macapp/dist.noindex/Referee.app, Referee-mac.zip (Apple silicon), its .sha256 and Referee-extension.zip.
 #
-# Usage: sh macapp/package.sh RELEASE   e.g. 2026-10-12, or 2026-10-12.2 for a second that day.
+# Usage: sh macapp/package.sh RELEASE   e.g. v1.0.0 (the tag of the GitHub release).
 # Publish them as a GitHub release with that name: copies of Referee check for newer releases
 # and update themselves.
 #
@@ -13,8 +13,8 @@
 set -e
 RELEASE="$1"
 case "$RELEASE" in
-  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].[0-9]*) ;;
-  *) echo "Usage: sh macapp/package.sh RELEASE  (a date like 2026-10-12, or 2026-10-12.2)"; exit 1 ;;
+  v[0-9]*.[0-9]*.[0-9]*) ;;
+  *) echo "Usage: sh macapp/package.sh RELEASE  (a version tag like v1.0.0)"; exit 1 ;;
 esac
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
@@ -52,6 +52,7 @@ for f in "$REPO"/server/*.py; do case "$(basename "$f")" in eval_*|load_demo.py)
 cp "$REPO"/word-helper/*.py "$CODE/word-helper/"
 cp -R "$REPO/extension" "$APP/Contents/Resources/extension"
 rm -rf "$APP/Contents/Resources/extension/dev"
+cp -R "$REPO/gdocs-addon" "$APP/Contents/Resources/gdocs-addon"   # the Google Docs add-on and its setup guide
 find "$APP" -name "__pycache__" -type d -prune -exec rm -rf {} +
 
 # 4. Sign everything ad hoc (Apple silicon won't run unsigned code) and zip it.

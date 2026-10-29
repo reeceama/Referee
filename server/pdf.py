@@ -91,10 +91,18 @@ def extract_pdf(data: bytes, url: Optional[str] = None) -> Tuple[Dict, List[Tupl
         "type": "pdf",
     }
 
+    # Each page's text; scanned pages (little or no text of their own) are read from their image
+    # on this Mac with Apple's Vision, and the source is marked as partly read from images.
+    texts = [page.extract_text() or "" for page in reader.pages]
+    if texts and sum(len(t.strip()) < 40 for t in texts) > len(texts) / 3:
+        import ocr
+        found = ocr.read(data, ".pdf")
+        if found and any(t.strip() for t in found[0]):
+            texts, metadata["scanned_pages"] = found[0], found[1]
+
     # Sentences tagged with their page, stopping at the reference list.
     sentences: List[Tuple[str, int]] = []
-    for number, page in enumerate(reader.pages, start=1):
-        raw = page.extract_text() or ""
+    for number, raw in enumerate(texts, start=1):
         heading = REFERENCES.search(raw)
         if heading and number > 1:
             raw = raw[: heading.start()]
@@ -105,9 +113,9 @@ def extract_pdf(data: bytes, url: Optional[str] = None) -> Tuple[Dict, List[Tupl
             break
 
     if not sentences:
-        raise ValueError("No readable text in this PDF (it may be a scanned image).")
+        raise ValueError("No readable text in this PDF, and it couldn't be read as a scan here.")
     if not metadata["title"]:
-        first_page = reader.pages[0].extract_text() or "" if reader.pages else ""
+        first_page = texts[0] if texts else ""
         metadata["title"] = first_page_title(first_page) or sentences[0][0][:120]
 
     passages = []

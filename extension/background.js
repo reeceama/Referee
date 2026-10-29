@@ -6,8 +6,46 @@ importScripts("skip.js");
 
 const SERVER = "http://localhost:8000";
 const HEADERS = { "Content-Type": "application/json", "X-Referee": "1" };
-const ROUTES = ["check", "feedback", "statement", "code", "claims/current"];
+const ROUTES = ["check", "feedback", "statement", "code", "claims/current", "claims/ignore", "claims/order"];
 const MAX_LOG = 50;
+
+// Notes open sources through http://localhost:8000/open?url=…&page=…. If that source is already
+// open in a tab, it isn't opened twice: at a page, the new tab replaces the old; otherwise the old is shown.
+// Tabs are matched by the source they show, however its address was written.
+function sourceOf(address) {
+  try {
+    const link = new URL(address);
+    if (link.origin === SERVER && link.pathname === "/source-file") {
+      const inner = link.searchParams.get("url");
+      return inner && !inner.startsWith(SERVER) ? sourceOf(inner) : null;  // spaces and %20 count as the same
+    }
+    link.hash = "";
+    return link.href;
+  } catch {
+    return null;
+  }
+}
+
+chrome.tabs.onUpdated.addListener(async (tabId, change) => {
+  if (!change.url || !change.url.startsWith(`${SERVER}/open?`)) return;
+  const opening = new URL(change.url);
+  const source = opening.searchParams.get("url");
+  const page = opening.searchParams.get("page");
+  if (!source) return;
+  const tabs = await chrome.tabs.query({});
+  const already = tabs.find((t) => t.id !== tabId && t.url && sourceOf(t.url) === sourceOf(source));
+  if (!already) return; // not open yet: the /open page opens it at the page itself
+  if (page) {
+    // The PDF viewer keeps its scroll position on a reload and ignores "#page=", so going to a page
+    // in the open tab doesn't work. Instead the new tab opens the PDF at the page, and the old one
+    // closes: still one tab for the source, now at the page.
+    chrome.tabs.remove(already.id);
+    return;
+  }
+  await chrome.tabs.update(already.id, { active: true });
+  await chrome.windows.update(already.windowId, { focused: true });
+  chrome.tabs.remove(tabId);
+});
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (ROUTES.includes(message.type)) {
@@ -82,6 +120,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message.type === "page") {  // the library opens a report or exports a file: text, not JSON
     fetch(`${SERVER}/${message.path}`, { headers: HEADERS, cache: "no-store" })
       .then((response) => response.text())
+      .then(reply)
+      .catch(() => reply(null));
+    return true;
+  }
+  if (message.type === "gdoc") {  // Google Docs: the open document's text, from its plain-text export
+    // Only ever the document in the tab that asked, read with the person's own Google sign-in.
+    const id = (sender.tab?.url || "").match(/^https:\/\/docs\.google\.com\/document\/d\/([\w-]+)/)?.[1];
+    if (!id) { reply(null); return; }
+    fetch(`https://docs.google.com/document/d/${id}/export?format=txt`, { credentials: "include", cache: "no-store" })
+      .then((response) => (response.ok ? response.text() : null))
       .then(reply)
       .catch(() => reply(null));
     return true;

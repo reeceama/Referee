@@ -98,7 +98,6 @@ def report(sources: List[Dict], claims: List[Dict], project: Optional[str], styl
 {f"<table><tr><th>Claim</th><th>Source and supporting passage</th><th>Source read</th><th>Claim checked</th></tr>{claim_rows}</table>" if supported else "<p>No supported claims yet.</p>"}
 <p class="note">Reading times were recorded by Referee when each source was captured, and claims when Referee checked them
 as they were written. Both are kept on this computer. This report shows the research behind the writing; it is not tamper-proof.</p>
-<p class="note">To keep a copy, print this page (Cmd+P) and choose "Save as PDF".</p>
 </body></html>"""
 
 
@@ -124,7 +123,6 @@ def page(title: str, body: str) -> str:
 
     return f"""<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><title>{html.escape(title)}</title>
 <style>{PAGE_STYLE}</style></head><body>{body}
-<p class="note">Made by Referee from what it recorded on this computer. To keep a copy, print this page (Cmd+P) and choose "Save as PDF".</p>
 </body></html>"""
 
 
@@ -218,10 +216,14 @@ def presubmission(sources: List[Dict], claims: List[Dict], project: Optional[str
     return page(f"Before you submit: {name}", body)
 
 
-def trail(sources: List[Dict], claims: List[Dict], notes: Dict[str, List[Dict]], project: Optional[str]) -> str:
+def trail(sources: List[Dict], claims: List[Dict], notes: Dict[str, List[Dict]], project: Optional[str],
+          since: float = 0, until: Optional[float] = None, period: str = "", style: str = "apa") -> str:
 
     """
-    The research trail: one timeline of what was read, saved, highlighted and claimed.
+    The research trail: one timeline of what was read, saved, highlighted and claimed, between
+    since and until (the current trail starts where the last archived one ended), then each backed
+    claim with its evidence, and when its source was read and the claim checked (once the separate
+    "proof of work" report).
     """
 
     e = html.escape
@@ -245,8 +247,9 @@ def trail(sources: List[Dict], claims: List[Dict], notes: Dict[str, List[Dict]],
                 "misquote": "Misquote found"}.get(c["label"], "Claim checked")
         detail = f"<q>{e(c['sentence'])}</q>" + (f"<br><span class='muted'>{e(citations.clean_title(source))}</span>" if source else "")
         events.append((c["at"], what, detail))
+    events = [ev for ev in events if ev[0] >= since and (until is None or ev[0] < until)]
     events.sort(key=lambda event: event[0])
-    body = f"<h1>Research trail: {e(name)}</h1><div class='meta'>{len(events)} event{'' if len(events) == 1 else 's'}</div>"
+    body = f"<h1>Research trail: {e(name)}{e(period)}</h1><div class='meta'>{len(events)} event{'' if len(events) == 1 else 's'}</div>"
     if not events:
         return page(f"Research trail: {name}", body + "<p>Nothing recorded yet.</p>")
     day = None
@@ -262,4 +265,32 @@ def trail(sources: List[Dict], claims: List[Dict], notes: Dict[str, List[Dict]],
             day = today
         rows += f"<tr><td style='width:60px'>{time.strftime('%H:%M', moment)}</td><td style='width:150px'><b>{e(what)}</b></td><td>{detail}</td></tr>"
     body += f"<table>{rows}</table>"
+    body += evidence_table(sources, claims, project, style, since, until)
     return page(f"Research trail: {name}", body)
+
+
+def evidence_table(sources: List[Dict], claims: List[Dict], project: Optional[str], style: str,
+                   since: float = 0, until: Optional[float] = None) -> str:
+
+    """Each backed claim in the period: its citation and passage, when the source was read, when it was checked."""
+
+    e = html.escape
+    when = lambda t: f"{time.localtime(t).tm_mday} {time.strftime('%b %Y, %H:%M', time.localtime(t))}" if t else "—"
+    cited = cited_sources(sources, claims, project)
+    numbers = {s.get("url"): i + 1 for i, s in enumerate(cited)}
+    by_url = {s.get("url"): s for s in sources}
+    backed = [c for c in claims if c.get("label") == "supports" and in_project(c.get("project"), project)
+              and (c.get("at") or 0) >= since and (until is None or (c.get("at") or 0) < until)]
+    if not backed:
+        return ""
+    rows = ""
+    for c in sorted(backed, key=lambda c: c.get("at") or 0):
+        url = c["source"].get("url")
+        source = by_url.get(url) or c["source"]
+        cite = citations.in_text(style, source, number=numbers.get(url), page=c.get("page"), time=c.get("time"))
+        rows += (f"<tr><td>{e(c['sentence'])}</td><td>{e(cite)}<br><q>{e(c.get('quote') or '')}</q></td>"
+                 f"<td>{e(when((by_url.get(url) or {}).get('captured_ts')))}</td><td>{e(when(c.get('at')))}</td></tr>")
+    return ("<h2>Claims and their evidence</h2><table><tr><th>Claim</th><th>Source and passage</th><th>Source read</th>"
+            f"<th>Claim checked</th></tr>{rows}</table><p class='note'>Reading times were recorded when each source was "
+            "captured, and claims when Referee checked them as they were written. Both are kept on this computer. "
+            "This shows the research behind the writing; it is not tamper-proof.</p>")

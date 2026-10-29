@@ -13,8 +13,10 @@ final class LibraryModel: ObservableObject {
     @Published var projects: [String] = []
     @Published var current = ""
     @Published var links: [String: [String]] = [:]
+    @Published var archived: [String] = []
     @Published var references: [String] = []
     @Published var filter = "all"            // "all", "none" or a project name
+    @Published var document = ""              // References for one document ("" for all of them)
     @Published var style = WordSettings.style
     @Published var search = ""
     @Published var audits: [(document: String, issues: [(entry: String, note: String)])] = []
@@ -30,12 +32,18 @@ final class LibraryModel: ObservableObject {
                 projects = settings["projects"] as? [String] ?? []
                 current = settings["project"] as? String ?? ""
                 links = settings["links"] as? [String: [String]] ?? [:]
+                archived = settings["archived"] as? [String] ?? []
             }
             if filter != "all" && filter != "none" && !projects.contains(filter) { filter = "all" }
             audits = LibraryModel.findings(await API.get("audit") ?? [:])
             warnings = LibraryModel.findings(await API.get("warnings") ?? [:])
             await loadReferences()
         }
+    }
+
+    /// The documents with checks in this view, for choosing whose references to show.
+    var documents: [String] {
+        Array(Set(claims.filter { inFilter($0["project"]) }.map { $0["document"] as? String ?? "Unnamed document" })).sorted()
     }
 
     /// Per-document findings from the Word helper, as (document, [(entry, note)]).
@@ -52,6 +60,7 @@ final class LibraryModel: ObservableObject {
 
     func loadReferences() async {
         let query = "references?project=\(filter.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "all")&style=\(style)"
+            + "&document=\(document.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")"
         references = (await API.getPath(query))?["entries"] as? [String] ?? []
     }
 
@@ -87,17 +96,13 @@ final class LibraryModel: ObservableObject {
         let unsupported = mine.filter { ($0["label"] as? String) == "needs_source" }.count
         if against > 0 { line += " · \(against) contradicted by a source" }
         if unsupported > 0 { line += " · \(unsupported) need\(unsupported == 1 ? "s" : "") a source" }
-        var perSource: [String: Int] = [:]
-        for claim in backed { perSource[(claim["source"] as? [String: Any])?["url"] as? String ?? "", default: 0] += 1 }
-        if backed.count >= 4, let top = perSource.values.max(), Double(top) / Double(backed.count) > 0.5 {
-            line += ". \(top) of them rest on one source; consider backing some with others."
-        }
         return line
     }
 
     // Actions, each followed by a reload.
     func setCurrent(_ name: String) { Task { _ = await API.post("settings", ["project": name]); load() } }
     func rename(_ old: String, to new: String) { Task { _ = await API.post("projects/rename", ["old": old, "new": new]); if filter == old { filter = new.isEmpty ? "all" : new }; load() } }
+    func archive(_ name: String, _ archived: Bool) { Task { _ = await API.post("projects/archive", ["project": name, "archived": archived]); load() } }
     func setLinks(_ project: String, _ others: [String]) { Task { var all = links; all[project] = others; _ = await API.post("settings", ["links": all]); load() } }
     func move(_ url: String, to project: String) { Task { _ = await API.post("sources/move", ["url": url, "project": project]); load() } }
     func keep(_ url: String) { Task { _ = await API.post("sources/keep", ["url": url]); load() } }
@@ -105,6 +110,22 @@ final class LibraryModel: ObservableObject {
     @Published var rereading: Set<String> = []
 
     /// Reads a saved paper again with its maths and abstract, keeping its project and notes.
+    /// The name you see for a source. References keep its citation details.
+    func renameSource(_ url: String, to name: String) {
+        Task {
+            _ = await API.post("sources/rename", ["url": url, "name": name])
+            load()
+        }
+    }
+
+    /// Citation details for a source that lacks them, such as lecture notes. Its \\cite key stays the same.
+    func saveDetails(_ url: String, _ details: [String: String]) {
+        Task {
+            _ = await API.post("sources/details", ["url": url].merging(details) { a, _ in a })
+            load()
+        }
+    }
+
     func reread(_ url: String) {
         rereading.insert(url)
         Task {
@@ -117,13 +138,16 @@ final class LibraryModel: ObservableObject {
     func forgetEverything() { Task { _ = await API.post("clear", [:]); load() } }
 
     /// Opens one of the server's report pages (proof of work, before you submit, research trail) in the browser.
+    @Published var report: (title: String, html: String, trailProject: String?)?
+
     func open(_ page: String, named name: String) {
         Task {
-            let query = "\(page)?project=\(filter.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "all")&style=\(style)"
-            guard let html = await API.request(query, timeout: 30) else { return }
-            let file = FileManager.default.temporaryDirectory.appendingPathComponent("Referee \(name).html")
-            try? html.write(to: file)
-            NSWorkspace.shared.open(file)
+            // The research trail is a project's: with All Reading shown, it's the current project's.
+            let scope = page == "trail" && filter == "all" && !current.isEmpty ? current : filter
+            let query = "\(page)?project=\(scope.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "all")&style=\(style)"
+            guard let data = await API.request(query, timeout: 30), let html = String(data: data, encoding: .utf8) else { return }
+            report = (name.prefix(1).uppercased() + name.dropFirst(), html,
+                      page == "trail" && scope != "all" ? (scope == "none" ? "" : scope) : nil)   // shown in Referee, not the browser
         }
     }
 
@@ -171,44 +195,103 @@ struct LibraryView: View {
     @StateObject private var library = LibraryModel()
     @State private var newProject = ""
     @State private var renaming: String?
+    @State private var renamingSource: String?     // the source whose name is being edited
+    @State private var settingDue: String?
+    @State private var sourceName = ""
+    @State private var detailing: String?          // the source whose citation details are open
+    @State private var details: [String: String] = [:]
     @State private var renameTo = ""
     @State private var armed: String?           // a saved source or project waiting for its second click
     @State private var confirmEverything = ""
     @State private var copied = false
+    @State private var forgetting: String?
+    @State private var lastDocument = UserDefaults.standard.string(forKey: "lastEvidenceDocument") ?? ""
+    @State private var choosing: String?          // the header list open: reports or import & export
+
+    @State private var showingReferences = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                Text(library.summary).font(.callout).foregroundStyle(.secondary)
-                card(title: "Projects", symbol: "folder") { projectsCard }
-                card(title: "References", symbol: "text.quote") { referencesCard }
+        Page {
+            controls
+            if showingReferences {
+                referencesList.padding(.top, 18)
                 if !library.warnings.isEmpty {
-                    card(title: "Warnings", symbol: "exclamationmark.triangle") { findingsCard(library.warnings) }
+                    FieldLabel("Warnings").padding(.top, 28).padding(.bottom, 8)
+                    findingsList(library.warnings)
                 }
-                if !library.audits.isEmpty {
-                    card(title: "Reference Check", symbol: "checklist") { findingsCard(library.audits) }
-                }
-                card(title: "Reading", symbol: "books.vertical") { readingCard }
-                forgetEverything
+            } else {
+                readingList
+                forgetEverything.padding(.top, 36)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 24)
-            .padding(.top, 4)
         }
-        .frame(minWidth: 640, idealWidth: 720, minHeight: 520, idealHeight: 720)
-        .background(WindowGlass().ignoresSafeArea())
         .onAppear { library.load() }
+        // Choosing a document in the sidebar shows its references here.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
+            let chosen = UserDefaults.standard.string(forKey: "lastEvidenceDocument") ?? ""
+            if chosen != lastDocument { lastDocument = chosen; library.document = chosen; Task { await library.loadReferences() } }
+        }
+        .pageActions { HStack(spacing: 14) {
+            searchField; reportsMenu; transferMenu
+            RecentlyDeletedButton(kind: "source", project: library.filter, inHeader: true) { library.load() }
+            addButton
+        } }
+        .sheet(isPresented: Binding(get: { library.report != nil }, set: { if !$0 { library.report = nil } })) {
+            if let report = library.report { ReportView(title: report.title, html: report.html, trailProject: report.trailProject) }
+        }
     }
 
-    // MARK: Header: which reading, search, report.
+    // MARK: Header bar: search, reports, import and export, add.
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            Image(nsImage: whistle(false)).resizable().frame(width: 24, height: 24)
-            Text("Library").font(.title2.weight(.semibold))
-            Spacer()
-            Picker("Show", selection: $library.filter) {
+    private var searchField: some View {
+        TextField("Search", text: $library.search)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 160)
+    }
+
+    // Plain buttons opening small lists, as on Notes: a menu's icon is drawn heavier than the
+    // header's other buttons.
+    // The research trail: what was read, saved, highlighted and checked, and each claim's evidence.
+    private var reportsMenu: some View {
+        Button { library.open("trail", named: "research trail") } label: { HeaderIcon("doc.text") }
+            .buttonStyle(.borderless)
+            .help("Research Trail")
+    }
+
+    private var transferMenu: some View {
+        Button { choosing = "transfer" } label: { HeaderIcon(library.importing ? "hourglass" : "square.and.arrow.down") }
+            .buttonStyle(.borderless)
+            .disabled(library.importing)
+            .help(library.importing ? "Importing…" : "Import & Export")
+            .popover(isPresented: Binding(get: { choosing == "transfer" }, set: { if !$0 { choosing = nil } }), arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Button("Import .bib or .ris…") { choosing = nil; library.importFile() }
+                    Button("Export .bib or .ris…") { choosing = nil; library.export() }
+                }
+                .buttonStyle(.plain)
+                .padding(12)
+                .fixedSize()   // the same small list as every header popover
+            }
+    }
+
+    private var addButton: some View {
+        Button { Windows.open("add-source") } label: { HeaderIcon("plus") }
+            .buttonStyle(.borderless)
+            .help("Add Source")
+    }
+
+    // MARK: Reading or References, which project, and the summary.
+
+    private var controls: some View {
+        // Wraps onto a second line in a narrow window rather than running off the page.
+        WrappingRow(spacing: 12, lineSpacing: 8) {
+            Picker("Show", selection: $showingReferences) {
+                Text("Reading").tag(false)
+                Text("References").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Picker("Project", selection: $library.filter) {
                 Text("All Reading").tag("all")
                 ForEach(library.projects, id: \.self) { Text($0).tag($0) }
                 Text("No Project").tag("none")
@@ -216,103 +299,26 @@ struct LibraryView: View {
             .labelsHidden()
             .fixedSize()
             .onChange(of: library.filter) { _, _ in Task { await library.loadReferences() } }
-            TextField("Search", text: $library.search)
-                .textFieldStyle(.plain)
-                .frame(width: 140)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .glassCard()
-            Menu("Reports") {
-                Button("Before You Submit") { library.open("presubmission", named: "before you submit") }
-                Button("Research Trail") { library.open("trail", named: "research trail") }
-                Button("Proof of Work") { library.open("report", named: "proof of work") }
-            }
-            .fixedSize()
-            .glassButton()
-            Menu(library.importing ? "Importing…" : "Zotero") {
-                Button("Import .bib or .ris…") { library.importFile() }
-                Button("Export Saved Sources…") { library.export() }
-            }
-            .fixedSize()
-            .disabled(library.importing)
-            .glassButton()
+            Text(counts).font(Scaled.style(11, .regular)).foregroundStyle(.tertiary)
+                .lineLimit(1)
         }
     }
 
-    // MARK: Projects
-
-    private var projectsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if library.projects.isEmpty {
-                Text("No projects yet. Writing is checked against all your reading until you choose one.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            ForEach(library.projects, id: \.self) { name in
-                HStack(spacing: 10) {
-                    if renaming == name {
-                        TextField("Project name", text: $renameTo)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { finishRename(name) }
-                        Button("Rename") { finishRename(name) }.glassButton()
-                        Button("Cancel") { renaming = nil }.glassButton()
-                    } else {
-                        Text(name).fontWeight(.semibold)
-                        Text("\(library.sources.filter { ($0["project"] as? String) == name }.count) sources")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        if library.current == name {
-                            Text("Current").font(.caption.weight(.semibold)).foregroundStyle(.green)
-                        } else {
-                            Button("Make Current") { library.setCurrent(name) }.glassButton()
-                        }
-                        Button("Rename") { renaming = name; renameTo = name }.glassButton()
-                        Button(armed == "project:" + name ? "Click Again" : "Delete") { twoClicks("project:" + name) { library.rename(name, to: "") } }
-                            .glassButton()
-                            .help("Its sources stay, with no project")
-                    }
-                }
-            }
-            HStack(spacing: 8) {
-                TextField("New project name", text: $newProject)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .glassCard()
-                    .onSubmit(createProject)
-                Button("Create", action: createProject)
-                    .disabled(newProject.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .prominentGlassButton()
-            }
-            if library.projects.contains(library.filter) && library.projects.count > 1 {
-                Divider().opacity(0.4)
-                Text("\(library.filter) can also cite references from:").font(.callout).foregroundStyle(.secondary)
-                ForEach(library.projects.filter { $0 != library.filter }, id: \.self) { other in
-                    Toggle(other, isOn: Binding(
-                        get: { library.links[library.filter]?.contains(other) ?? false },
-                        set: { on in
-                            var others = library.links[library.filter] ?? []
-                            if on { others.append(other) } else { others.removeAll { $0 == other } }
-                            library.setLinks(library.filter, others)
-                        }))
-                }
-            }
-        }
-    }
-
-    private func createProject() {
-        let name = newProject.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        newProject = ""
-        library.setCurrent(name)
-    }
-
-    private func finishRename(_ old: String) {
-        let new = renameTo.trimmingCharacters(in: .whitespaces)
-        renaming = nil
-        if !new.isEmpty && new != old { library.rename(old, to: new) }
+    private var counts: String {
+        let shown = library.shown.filter { ($0["kept"] as? Bool) != false }
+        let cited = shown.filter { library.backs($0["url"] as? String ?? "") > 0 }.count
+        return "\(shown.count) source\(shown.count == 1 ? "" : "s") · \(cited) cited"
     }
 
     // MARK: References
 
-    private var referencesCard: some View {
+    /// "PLA - Semester 1 - Online LaTeX Editor Overleaf (Overleaf)" -> "PLA - Semester 1"
+    static func short(_ document: String) -> String {
+        document.replacingOccurrences(of: #"\s*\([^)]*\)$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s*[-–|]\s*(Online LaTeX Editor )?Overleaf$"#, with: "", options: .regularExpression)
+    }
+
+    private var referencesList: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Picker("Style", selection: $library.style) {
@@ -321,6 +327,16 @@ struct LibraryView: View {
                 .labelsHidden()
                 .fixedSize()
                 .onChange(of: library.style) { _, _ in Task { await library.loadReferences() } }
+                // Whose references: every document's, or one (follows the document chosen in the sidebar).
+                if library.documents.count > 1 || !library.document.isEmpty {
+                    Picker("Document", selection: $library.document) {
+                        Text("All documents").tag("")
+                        ForEach(library.documents, id: \.self) { Text(Self.short($0)).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .onChange(of: library.document) { _, _ in Task { await library.loadReferences() } }
+                }
                 Spacer()
                 Button(copied ? "Copied" : "Copy") {
                     NSPasteboard.general.clearContents()
@@ -333,7 +349,7 @@ struct LibraryView: View {
             }
             if library.references.isEmpty {
                 Text("Sources appear here once they back a claim in your writing.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(Scaled.style(12, .regular)).foregroundStyle(.secondary)
             }
             ForEach(Array(library.references.enumerated()), id: \.offset) { _, entry in
                 Text(entry).font(.system(.body, design: .serif)).textSelection(.enabled)
@@ -343,13 +359,13 @@ struct LibraryView: View {
 
     // MARK: Reference check, from the Word helper
 
-    private func findingsCard(_ findings: [(document: String, issues: [(entry: String, note: String)])]) -> some View {
+    private func findingsList(_ findings: [(document: String, issues: [(entry: String, note: String)])]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(findings, id: \.document) { audit in
                 Text(audit.document).fontWeight(.semibold)
                 ForEach(Array(audit.issues.enumerated()), id: \.offset) { _, issue in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(issue.note).font(.callout).foregroundStyle(.orange)
+                        Text(issue.note).font(Scaled.style(12, .regular)).foregroundStyle(.orange)
                         Text(issue.entry).font(.system(.caption, design: .serif)).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
@@ -359,16 +375,30 @@ struct LibraryView: View {
 
     // MARK: Reading
 
-    private var readingCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private var readingList: some View {
+        let saved = library.shown.filter { ($0["kept"] as? Bool) != false }
+        let temporary = library.shown.filter { ($0["kept"] as? Bool) == false }
+        return VStack(alignment: .leading, spacing: 0) {
             if library.shown.isEmpty {
-                Text(library.sources.isEmpty ? "Nothing yet. Add sources with Add Source, or read with the browser extension." : "Nothing matches.")
-                    .font(.callout).foregroundStyle(.secondary)
+                Text(library.sources.isEmpty ? "Nothing yet. Add sources with + above, or read with the browser extension." : "Nothing matches.")
+                    .font(Scaled.style(12, .regular)).foregroundStyle(.secondary)
+                    .padding(.top, 24)
             }
-            ForEach(Array(library.shown.enumerated()), id: \.offset) { index, source in
-                if index > 0 { Divider().opacity(0.4).padding(.vertical, 8) }
-                sourceRow(source)
+            if !saved.isEmpty {
+                FieldLabel("Saved").padding(.top, 24).padding(.bottom, 6)
+                rows(saved)
             }
+            if !temporary.isEmpty {
+                FieldLabel("Temporary · forgotten unless saved").padding(.top, 28).padding(.bottom, 6)
+                rows(temporary)
+            }
+        }
+    }
+
+    private func rows(_ sources: [[String: Any]]) -> some View {
+        ForEach(Array(sources.enumerated()), id: \.offset) { index, source in
+            if index > 0 { Hairline() }
+            sourceRow(source).padding(.vertical, 10)
         }
     }
 
@@ -380,15 +410,46 @@ struct LibraryView: View {
         let read = [source["site"] as? String, source["captured_at"] as? String].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                if let link = URL(string: url), url.hasPrefix("http") {
-                    Link(title(source), destination: link).fontWeight(.semibold)
+                if renamingSource == url {
+                    HStack(spacing: 6) {
+                        TextField("Name", text: $sourceName)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { finishSourceRename(url) }
+                        Button("Save") { finishSourceRename(url) }.glassButton()
+                        Button("Cancel") { renamingSource = nil }.glassButton()
+                    }
                 } else {
-                    Text(title(source)).fontWeight(.semibold)
+                    HStack(spacing: 6) {
+                        if let link = URL(string: url), url.hasPrefix("http") {
+                            titleLink(title(source)) { NSWorkspace.shared.open(link) }
+                        } else if url.hasPrefix("file://") {
+                            // A PDF saved from this computer: opens in the browser like a web page, at
+                            // its first page (or switches to it if it's already open).
+                            titleLink(title(source)) { RefereeLinks.openSource(url, page: nil, pdf: true) }
+                        } else {
+                            Text(title(source)).font(Fonts.heading(15, .semibold))
+                        }
+                    }
                 }
-                if !read.isEmpty { Text(read).font(.caption).foregroundStyle(.secondary) }
+                if detailing == url {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("How this source appears in references. Its \\cite key stays the same.")
+                            .font(Scaled.style(10, .regular)).foregroundStyle(.secondary)
+                        detailField("Title", "title")
+                        detailField("Authors", "author", prompt: "Surname, First; Surname, First")
+                        detailField("Year", "date", prompt: "e.g. 2019")
+                        detailField("Publisher", "site", prompt: "e.g. Queen Mary University of London")
+                        HStack {
+                            Button("Save") { library.saveDetails(url, details); detailing = nil }.glassButton()
+                            Button("Cancel") { detailing = nil }.glassButton()
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                if !read.isEmpty { Text(read).font(Scaled.style(10, .regular)).foregroundStyle(.secondary) }
                 ForEach(Array((library.notes[url] ?? []).prefix(3).enumerated()), id: \.offset) { _, note in
                     Text("“\(note)”")
-                        .font(.caption)
+                        .font(Scaled.style(10, .regular))
                         .italic()
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -397,48 +458,67 @@ struct LibraryView: View {
                 }
                 HStack(spacing: 6) {
                     if source["retracted"] as? Bool == true { tag("Retracted", colour: .red) }
-                    tag(temporary ? "Temporary" : "Saved", colour: temporary ? .orange : .green)
                     tag(type, colour: .secondary)
-                    if backs > 0 { tag("Backs \(backs) claim\(backs == 1 ? "" : "s")", colour: .green) }
+                    if backs > 0 { tag("Cited \(backs)×", colour: .green) }
+                    if let project = source["project"] as? String, !project.isEmpty, library.filter == "all" { tag(project, colour: .secondary) }
                 }
             }
             Spacer()
-            Menu(source["project"] as? String ?? "No Project") {
-                Button("No Project") { library.move(url, to: "") }
-                ForEach(library.projects, id: \.self) { name in Button(name) { library.move(url, to: name) } }
-            }
-            .fixedSize()
-            if !temporary {
-                if library.rereading.contains(url) {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button { library.reread(url) } label: { Image(systemName: "arrow.clockwise") }
-                        .buttonStyle(.borderless)
-                        .help("Read again, keeping maths and the abstract")
-                }
-            }
-            if let key = source["cite_key"] as? String {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString("\\cite{\(key)}", forType: .string)
-                } label: { Image(systemName: "text.quote") }
-                .buttonStyle(.borderless)
-                .help("Copy \\cite{\(key)} for LaTeX")
-            }
             if temporary {
                 Button("Save") { library.keep(url) }.glassButton()
             }
-            Button {
-                if temporary { library.forget(url) } else { twoClicks("source:" + url) { library.forget(url) } }
-            } label: {
-                Image(systemName: "xmark").foregroundStyle(armed == "source:" + url ? .red : .secondary)
-            }
-            .buttonStyle(.plain)
-            .help(temporary ? "Forget this source" : armed == "source:" + url ? "Click again to forget" : "Forget this source")
+            if library.rereading.contains(url) { ProgressView().controlSize(.small) }
+            Menu {
+                Menu("Project") {
+                    Button("No Project") { library.move(url, to: "") }
+                    ForEach(library.projects, id: \.self) { name in Button(name) { library.move(url, to: name) } }
+                }
+                Button("Rename…") { renamingSource = url; sourceName = title(source) }
+                Button("Citation Details…") {
+                    detailing = url
+                    details = ["title": source["title"] as? String ?? "", "author": source["author"] as? String ?? "",
+                               "date": source["date"] as? String ?? "", "site": source["site"] as? String ?? ""]
+                }
+                if let key = source["cite_key"] as? String {
+                    Button("Copy \\cite{\(key)}") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("\\cite{\(key)}", forType: .string)
+                    }
+                }
+                if !temporary { Button("Read Again") { library.reread(url) } }
+                if url.hasPrefix("file://"), url.lowercased().hasSuffix(".pdf"), let marked = library.notes[url], !marked.isEmpty,
+                   let file = URL(string: url) {
+                    Button("Save a Copy with Highlights…") {
+                        if let written = PDFHighlights.saveCopy(of: file, highlights: marked) {
+                            let done = NSAlert()
+                            done.messageText = "Saved a copy with your highlights"
+                            done.informativeText = written == marked.count
+                                ? "\(written) highlight\(written == 1 ? "" : "s") written in. The original PDF isn't changed."
+                                : "\(written) of \(marked.count) highlights written in; the rest weren't found in the PDF's text. The original isn't changed."
+                            done.runModal()
+                        }
+                    }
+                }
+                Divider()
+                Button("Forget…", role: .destructive) { forgetting = url }
+            } label: { Image(systemName: "ellipsis") }
+            .menuIndicator(.hidden)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("More")
+        }
+        .confirmationDialog("Forget “\(title(source))”?", isPresented: Binding(get: { forgetting == url }, set: { if !$0 { forgetting = nil } })) {
+            Button("Forget", role: .destructive) { library.forget(url); forgetting = nil }
+            Button("Cancel", role: .cancel) { forgetting = nil }
+        } message: {
+            Text("It stays in Recently Deleted for 30 days, with its highlights and the checks it backed.")
         }
     }
 
+    /// The name shown: the person's own name for it if they gave one, else its title.
     private func title(_ source: [String: Any]) -> String {
+        if let name = source["name"] as? String, !name.isEmpty { return name }
         let title = source["title"] as? String ?? source["url"] as? String ?? "Untitled"
         return title.replacingOccurrences(of: #"\s+[-|–—]\s+[^-|–—]+$"#, with: "", options: .regularExpression)
     }
@@ -467,10 +547,25 @@ struct LibraryView: View {
             .foregroundStyle(.red)
             .glassButton()
         }
-        .font(.callout)
+        .font(Scaled.style(12, .regular))
     }
 
     // Saved things take two clicks: the first arms the button for three seconds.
+    private func detailField(_ label: String, _ key: String, prompt: String = "") -> some View {
+        HStack {
+            Text(label).frame(width: 70, alignment: .leading).foregroundStyle(.secondary)
+            TextField(label, text: Binding(get: { details[key] ?? "" }, set: { details[key] = $0 }),
+                      prompt: prompt.isEmpty ? nil : Text(prompt))
+                .textFieldStyle(.roundedBorder)
+        }
+        .font(Scaled.style(12, .regular))
+    }
+
+    private func finishSourceRename(_ url: String) {
+        library.renameSource(url, to: sourceName.trimmingCharacters(in: .whitespaces))  // empty: back to its title
+        renamingSource = nil
+    }
+
     private func twoClicks(_ key: String, action: @escaping () -> Void) {
         if armed == key {
             armed = nil
@@ -481,15 +576,136 @@ struct LibraryView: View {
         }
     }
 
+    /// A source's title as a link. Plain text with a tap, rather than a Link or link button,
+    /// which macOS centres when a long title wraps.
+    private func titleLink(_ title: String, open: @escaping () -> Void) -> some View {
+        // The heading font, like Notes' titles; it opens the source when clicked.
+        Text(title)
+            .font(Fonts.heading(15, .semibold))
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .onTapGesture(perform: open)
+            // Usable with VoiceOver and the keyboard too, not only a click.
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(named: "Open") { open() }
+            .onHover { inside in if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+    }
+
     private func card<Content: View>(title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: symbol)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+        // The page style: a hairline, a small capital label, then the content with no box.
+        VStack(alignment: .leading, spacing: 12) {
+            Hairline().padding(.bottom, 6)
+            FieldLabel(title)
             content()
-                .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .glassCard()
         }
+    }
+}
+
+
+/// The sidebar project's popover: switch project, and everything about projects (new, due date,
+/// which others it may cite from, rename, delete), moved here from the Library.
+struct ProjectPopover: View {
+
+    let current: String
+    let projects: [String]
+    let choose: (String) -> Void
+    let close: () -> Void
+    let setDue: () -> Void     // the due date opens as a sheet: the popover kept its first size and cut it off
+    @StateObject private var library = LibraryModel()
+    private enum Step { case list, new, rename, citeFrom }
+    @State private var step = Step.list
+    @State private var name = ""
+    @State private var deleting = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            switch step {
+            case .list: list
+            case .new: nameField("New project name", button: "Create") { choose($0); close() }
+            case .rename: nameField("Project name", button: "Rename") { library.rename(current, to: $0); close() }
+            case .citeFrom: citeFrom
+            }
+        }
+        .padding(8)
+        .frame(minWidth: 240)
+        .onAppear { library.load() }
+        .confirmationDialog("Delete “\(current)”?", isPresented: $deleting) {
+            Button("Delete", role: .destructive) { library.rename(current, to: ""); close() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its sources stay, with no project.")
+        }
+    }
+
+    private var list: some View {
+        Group {
+            ForEach([""] + projects, id: \.self) { project in
+                row(project.isEmpty ? "No project" : project, check: project == current) { choose(project); close() }
+            }
+            Divider().padding(.vertical, 4)
+            row("New Project…") { name = ""; step = .new }
+            if !current.isEmpty {
+                row("Due Date…") { close(); setDue() }
+                if projects.count > 1 { row("Also Cite From…") { step = .citeFrom } }
+                row("Rename…") { name = current; step = .rename }
+                row("Archive Project") { library.archive(current, true); close() }
+                row("Delete Project…", destructive: true) { deleting = true }
+            }
+            if !library.archived.isEmpty {
+                Divider().padding(.vertical, 4)
+                Text("Archived").font(Scaled.style(11, .regular)).foregroundStyle(.secondary).padding(.horizontal, 10)
+                ForEach(library.archived, id: \.self) { project in
+                    row(project) { library.archive(project, false); choose(project); close() }
+                        .help("Bring it back and make it current")
+                }
+            }
+        }
+    }
+
+    private func row(_ title: String, check: Bool? = nil, destructive: Bool = false, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                if let check { Image(systemName: "checkmark").opacity(check ? 1 : 0) }
+                Text(title).foregroundStyle(destructive ? Color.red : Color.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func nameField(_ prompt: String, button: String, _ done: @escaping (String) -> Void) -> some View {
+        HStack(spacing: 8) {
+            TextField(prompt, text: $name)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { submit(done) }
+            Button(button) { submit(done) }
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(6)
+    }
+
+    private func submit(_ done: (String) -> Void) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty && trimmed != current { done(trimmed) }
+    }
+
+    private var citeFrom: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(current) can also cite references from:")
+                .font(Scaled.style(12, .regular)).foregroundStyle(.secondary)
+            ForEach(projects.filter { $0 != current }, id: \.self) { other in
+                Toggle(other, isOn: Binding(
+                    get: { library.links[current]?.contains(other) ?? false },
+                    set: { on in
+                        var others = library.links[current] ?? []
+                        if on { others.append(other) } else { others.removeAll { $0 == other } }
+                        library.setLinks(current, others)
+                    }))
+            }
+        }
+        .padding(6)
     }
 }

@@ -36,8 +36,9 @@ def keys(sources: List[Dict]) -> Dict[str, str]:
     library, so a key copied from the Library always matches the one in any export.
     """
 
-    used: set = set()
-    return {s.get("url"): _key(s, used) for s in sources}
+    # A source renamed after its key was made keeps that key, so \cite{}s already written still work.
+    used: set = {s["cite_key"] for s in sources if s.get("cite_key_fixed") and s.get("cite_key")}
+    return {s.get("url"): s["cite_key"] if s.get("cite_key_fixed") and s.get("cite_key") else _key(s, used) for s in sources}
 
 
 def bibtex(sources: List[Dict], cite_keys: Dict[str, str] = None) -> str:
@@ -52,7 +53,10 @@ def bibtex(sources: List[Dict], cite_keys: Dict[str, str] = None) -> str:
             "year": str(s.get("date") or "")[:4],
             ("journal" if journal else "howpublished"): s.get("site"),
             "volume": s.get("volume"), "number": s.get("issue"), "pages": s.get("pages"),
-            "doi": s.get("doi"), "url": s.get("url"), "urldate": s.get("captured_at"),
+            "doi": s.get("doi"),
+            # A file on this computer means nothing to a reader: no url or access date for it.
+            "url": None if (s.get("url") or "").startswith("file://") else s.get("url"),
+            "urldate": None if (s.get("url") or "").startswith("file://") else s.get("captured_at"),
         }
         lines = [f"  {k} = {{{str(v).replace('{', '').replace('}', '')}}}" for k, v in fields.items() if v]
         entries.append(f"@{'article' if journal else 'misc'}{{{(cite_keys or {}).get(s.get('url')) or _key(s, used)},\n" + ",\n".join(lines) + "\n}")
@@ -67,7 +71,8 @@ def ris(sources: List[Dict]) -> str:
         lines = [f"TY  - {'JOUR' if journal else 'ELEC'}", f"TI  - {citations.clean_title(s)}"]
         lines += [f"AU  - {p['last']}, {' '.join(p['firsts'])}".rstrip(", ") for p in _people(s)]
         for tag, value in [("PY", str(s.get("date") or "")[:4]), ("JO" if journal else "PB", s.get("site")), ("VL", s.get("volume")),
-                           ("IS", s.get("issue")), ("SP", s.get("pages")), ("DO", s.get("doi")), ("UR", s.get("url")), ("Y2", s.get("captured_at"))]:
+                           ("IS", s.get("issue")), ("SP", s.get("pages")), ("DO", s.get("doi")), ("UR", None if (s.get("url") or "").startswith("file://") else s.get("url")),
+                           ("Y2", None if (s.get("url") or "").startswith("file://") else s.get("captured_at"))]:
             if value:
                 lines.append(f"{tag}  - {value}")
         records.append("\n".join(lines + ["ER  - "]))

@@ -19,7 +19,7 @@ warnings.json
 
 # Evaluation outputs
 server/eval_*.csv
-server/eval_pr.png
+server/eval_pr*.png
 
 # Editor and OS files
 .vscode/
@@ -30,3 +30,6 @@ Thumbs.db
 macapp/build.noindex/
 macapp/dist.noindex/
 macapp/build-cache/
+
+# SwiftMath, fetched by macapp/build.sh at a fixed version
+macapp/Packages/

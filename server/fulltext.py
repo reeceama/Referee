@@ -20,6 +20,8 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
+import privacy
+
 from extract import extract_page, make_passages, split_sentences
 from metadata import find_doi
 
@@ -44,6 +46,8 @@ def arxiv_by_title(title: str) -> Optional[str]:
     """
     The arXiv version of a published paper, found by its exact title (most maths papers have one).
     """
+    if not privacy.allowed("paper_details"):
+        return None  # switched off in Settings: nothing is sent
 
     squash = lambda t: re.sub(r"[^a-z0-9]", "", (t or "").lower())
     if len(squash(title)) < 15:
@@ -146,6 +150,8 @@ def latex_to_text(tex: str) -> str:
 
 
 def _arxiv_source(identifier: str) -> Optional[str]:
+    if not privacy.allowed("paper_details"):
+        return None  # switched off in Settings: nothing is sent
 
     try:
         response = requests.get(f"https://arxiv.org/e-print/{identifier}", headers=HEADERS, timeout=TIMEOUT)
@@ -170,6 +176,8 @@ def _arxiv_source(identifier: str) -> Optional[str]:
 
 
 def _html(url: str) -> Optional[str]:
+    if not privacy.allowed("paper_details"):
+        return None  # switched off in Settings: nothing is sent
 
     try:
         response = requests.get(url, headers=HEADERS, timeout=TIMEOUT)

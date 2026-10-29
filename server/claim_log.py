@@ -8,6 +8,7 @@ its document: reworded or deleted sentences are dropped, so reports list what's 
 
 import json
 import re
+import unicodedata
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -55,6 +56,7 @@ class ClaimLog:
         self.entries[sentence] = {
             "sentence": sentence,
             "label": verdict["label"],
+            "confidence": verdict.get("confidence"),  # the verifier's, 0 to 1, for the Evidence report
             "quote": verdict.get("quote"),
             "source": verdict.get("source"),
             "page": verdict.get("page"),
@@ -69,6 +71,8 @@ class ClaimLog:
             "together_with": verdict.get("together_with"),
             "closest": verdict.get("closest") or [],
             "at": self.entries.get(sentence, {}).get("at") or time.time(),
+            # The numbered statement the backing passage gives ("Definition 4.17"), for Evidence.
+            "statement": None,   # worked out from the stored passages when Evidence asks (main.statement_for)
         }
         self.save()
 
@@ -120,3 +124,25 @@ class ClaimLog:
 
         self.entries = {}
         self.save()
+
+
+STATEMENT = re.compile(r"\b(Definition|Theorem|Lemma|Proposition|Corollary|Fact)\s+(\d+(?:\.\d+)*)")
+
+
+def statement_of(passage: str, quote: str) -> Optional[str]:
+
+    """
+    The numbered statement a quote comes from: the last "Definition 4.17" (and the like) in the passage
+    before the quote (with no quote, the passage's last). None if there's none before it.
+    """
+
+    passage = unicodedata.normalize("NFKC", passage)   # PDFs write "Deﬁnition" with an "ﬁ" ligature
+    found = list(STATEMENT.finditer(passage))
+    if not found:
+        return None
+    at = passage.find(quote[:40]) if quote else -1
+    before = [m for m in found if at < 0 or m.start() <= at]
+    if not before:
+        return None   # the quote comes before any number here: the caller looks at the passage before
+    chosen = before[-1]
+    return f"{chosen.group(1)} {chosen.group(2)}"

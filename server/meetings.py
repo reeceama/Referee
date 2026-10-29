@@ -1,13 +1,14 @@
 """Meeting notes: supervisor meetings and group project meetings, kept by project.
 
-Each meeting has a date, title, attendees, notes, decisions and action points (what, who, by
-when, done). Action points not yet done are carried into the next meeting, and a project's log
+Each meeting has a date, title, attendees, notes, decisions and tasks (what, who, by
+when, done). Tasks not yet done are carried into the next meeting, and a project's log
 exports as Markdown (to paste into Teams or a shared document) or LaTeX (for Overleaf), so a
 group can share it.
 
-A project can be linked to its shared workspace folder (a GitHub repository or shared drive);
-its notes/decision-notes.md and notes/who-did-what.md are then rewritten whenever its meetings
-change, so the record a group project asks for is always current.
+A project can be linked to its group's shared folder (a GitHub repository or shared drive). Its
+Markdown files then open in Referee to read and edit, and are saved back exactly as you wrote
+them: Referee never writes to them by itself or assumes how they're laid out. A save is refused
+if the file changed since it was opened (a teammate's edit), so nobody's work is overwritten.
 """
 
 import json
@@ -37,13 +38,11 @@ class Meetings:
     def _save(self, projects: Optional[set] = None) -> None:
 
         self.path.write_text(json.dumps(self.items, indent=1), encoding="utf-8")
-        for project in projects if projects is not None else set(self.workspaces):
-            self.write_notes(project)
 
     def set_workspace(self, project: str, folder: str) -> Dict:
 
         """
-        Links a project to its shared workspace folder ("" to unlink), and writes its notes there.
+        Links a project to its group's shared folder ("" to unlink).
         """
 
         if folder:
@@ -51,27 +50,64 @@ class Meetings:
         else:
             self.workspaces.pop(project, None)
         self.workspaces_path.write_text(json.dumps(self.workspaces, indent=1), encoding="utf-8")
-        return {"folder": folder, "written": self.write_notes(project) if folder else []}
+        return {"folder": folder}
 
-    def write_notes(self, project: str) -> List[str]:
+    def _inside(self, project: str, relative: str) -> Optional[Path]:
+
+        folder = self.workspaces.get(project)
+        if not folder or not relative:
+            return None
+        root = Path(folder).resolve()
+        target = (root / relative).resolve()
+        return target if root in target.parents and target.suffix.lower() in (".md", ".markdown", ".txt") else None
+
+    def shared_files(self, project: str) -> List[Dict]:
 
         """
-        Rewrites notes/decision-notes.md and notes/who-did-what.md in the project's workspace.
+        The Markdown files in the project's shared folder (and one level down, such as notes/),
+        newest first.
         """
 
         folder = self.workspaces.get(project)
         if not folder or not Path(folder).is_dir():
             return []
-        notes = Path(folder) / "notes"
-        notes.mkdir(exist_ok=True)
-        written = []
-        for name in ("decision-notes", "who-did-what"):
-            target = notes / f"{name}.md"
-            text = self.export(project, name)
-            if not target.exists() or target.read_text(encoding="utf-8") != text:
-                target.write_text(text, encoding="utf-8")
-            written.append(str(target))
-        return written
+        root = Path(folder)
+        found = [p for pattern in ("*.md", "*/*.md", "*.markdown", "*/*.markdown")
+                 for p in root.glob(pattern) if not any(part.startswith(".") for part in p.relative_to(root).parts)]
+        return sorted(({"path": str(p.relative_to(root)), "modified": p.stat().st_mtime} for p in found),
+                      key=lambda f: f["modified"], reverse=True)[:100]
+
+    def read_shared(self, project: str, relative: str) -> Dict:
+
+        target = self._inside(project, relative)
+        if target is None or not target.is_file():
+            return {"ok": False, "reason": "That file isn't in the shared folder."}
+        return {"ok": True, "text": target.read_text(encoding="utf-8", errors="replace"), "modified": target.stat().st_mtime}
+
+    def write_shared(self, project: str, relative: str, text: str, opened: float) -> Dict:
+
+        """
+        Saves a file exactly as written, unless it changed since it was opened: then the current
+        version comes back instead, so a teammate's edit isn't overwritten.
+        """
+
+        target = self._inside(project, relative)
+        if target is None:
+            return {"ok": False, "reason": "That file isn't in the shared folder."}
+        if target.exists() and abs(target.stat().st_mtime - opened) > 0.001:
+            return {"ok": False, "conflict": True, "text": target.read_text(encoding="utf-8", errors="replace"),
+                    "modified": target.stat().st_mtime}
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+        return {"ok": True, "modified": target.stat().st_mtime}
+
+    def my_actions(self, project: str) -> str:
+
+        """
+        Your own tasks in this project, as Markdown, for you to place in a shared file.
+        """
+
+        return _my_actions(your_name() or "me", list(reversed(self.all(project))))
 
     def all(self, project: Optional[str] = None) -> List[Dict]:
 
@@ -96,8 +132,12 @@ class Meetings:
             "attendees": (meeting.get("attendees") or "").strip(),
             "notes": meeting.get("notes") or "",
             "decisions": meeting.get("decisions") or "",
+            # Photos and files to look at (a whiteboard, slides), kept in meeting-files/<id>/, by name.
+            "files": [f for f in meeting.get("files") or [] if isinstance(f, str) and "/" not in f and f.strip()],
             "actions": [{"id": a.get("id") or uuid.uuid4().hex, "text": (a.get("text") or "").strip(),
                          "who": (a.get("who") or "").strip(), "due": (a.get("due") or "").strip(), "done": bool(a.get("done")),
+                         "notes": a.get("notes") or "",
+                         "send_files": [f for f in a.get("send_files") or [] if isinstance(f, str) and "/" not in f],
                          **self._todoist(meeting.get("id"), a)}
                         for a in meeting.get("actions") or []],
             "created": meeting.get("created") or time.time(),
@@ -110,12 +150,13 @@ class Meetings:
     def _todoist(self, meeting_id: Optional[str], action: Dict) -> Dict:
 
         """
-        An action point's link to its Todoist task. The app doesn't send these back, so they're
-        kept from the saved copy of the same action point.
+        An task's link to its task in the to-do app. The app doesn't send these back, so they're
+        kept from the saved copy of the same task.
         """
 
         saved = next((a for m in self.items if m["id"] == meeting_id for a in m.get("actions", []) if a.get("id") == action.get("id")), {})
-        return {k: action.get(k, saved.get(k)) for k in ("todoist_id", "todoist_sent", "todoist_gone") if action.get(k, saved.get(k)) is not None}
+        keys = ("todoist_id", "todoist_sent", "todoist_gone", "task_app", "task_id", "task_sent", "task_gone", "files_sent")
+        return {k: action.get(k, saved.get(k)) for k in keys if action.get(k, saved.get(k)) is not None}
 
     def delete(self, meeting_id: str) -> bool:
 
@@ -145,10 +186,6 @@ class Meetings:
 
         meetings = list(reversed(self.all(project)))
         name = project if project else "All meetings" if project is None else "Meetings"
-        if format == "decision-notes":
-            return _decisions(name, meetings)
-        if format == "who-did-what":
-            return _who(name, meetings)
         return _latex(name, meetings) if format == "latex" else _markdown(name, meetings)
 
 
@@ -172,54 +209,11 @@ def _markdown(name: str, meetings: List[Dict]) -> str:
         if m["decisions"].strip():
             lines += ["**Decisions**", "", m["decisions"].strip(), ""]
         if m["actions"]:
-            lines += ["**Action points**", ""]
+            lines += ["**Tasks**", ""]
             for a in m["actions"]:
                 extra = ", ".join(v for v in [a["who"], f"by {a['due']}" if a["due"] else ""] if v)
                 lines.append(f"- [{'x' if a['done'] else ' '}] {a['text']}" + (f" ({extra})" if extra else ""))
             lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _decisions(name: str, meetings: List[Dict]) -> str:
-
-    """
-    decision-notes.md: what was decided, when, and (from the notes) why, meeting by meeting.
-    """
-
-    lines = [f"# Decision notes: {name}", ""]
-    for m in meetings:
-        if not m["decisions"].strip():
-            continue
-        lines += [f"## {_when(m['date'])}" + (f": {m['title']}" if m["title"] else ""), ""]
-        if m["attendees"]:
-            lines += [f"Present: {m['attendees']}", ""]
-        lines += ["**Decided**", "", m["decisions"].strip(), ""]
-        if m["notes"].strip():
-            lines += ["**Discussion**", "", m["notes"].strip(), ""]
-    if len(lines) == 2:
-        lines.append("No decisions recorded yet.")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _who(name: str, meetings: List[Dict]) -> str:
-
-    """
-    who-did-what.md: each person's action points, done and still to do, with the meeting they came from.
-    """
-
-    people: Dict[str, List[str]] = {}
-    for m in meetings:
-        for a in m["actions"]:
-            if not a["text"]:
-                continue
-            for person in [p.strip() for p in re.split(r",|&|\band\b", a["who"]) if p.strip()] or ["Unassigned"]:
-                due = f", due {a['due']}" if a["due"] else ""
-                people.setdefault(person, []).append(f"- [{'x' if a['done'] else ' '}] {a['text']} (from {_when(m['date'])}{due})")
-    lines = [f"# Who did what: {name}", ""]
-    for person in sorted(people, key=lambda p: (p == "Unassigned", p.lower())):
-        lines += [f"## {person}", "", *people[person], ""]
-    if len(lines) == 2:
-        lines.append("No action points recorded yet.")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -241,10 +235,34 @@ def _latex(name: str, meetings: List[Dict]) -> str:
             if body.strip():
                 out.append(r"\paragraph{" + heading + "}\n" + _tex(body.strip()).replace("\n", "\n\n") + "\n")
         if m["actions"]:
-            out.append(r"\paragraph{Action points}" + "\n" + r"\begin{itemize}")
+            out.append(r"\paragraph{Tasks}" + "\n" + r"\begin{itemize}")
             for a in m["actions"]:
                 extra = ", ".join(v for v in [a["who"], f"by {a['due']}" if a["due"] else ""] if v)
                 mark = r"[$\boxtimes$]" if a["done"] else r"[$\square$]"
                 out.append(rf"  \item{mark} " + _tex(a["text"]) + (f" ({_tex(extra)})" if extra else ""))
             out.append(r"\end{itemize}" + "\n")
     return "\n".join(out).rstrip() + "\n"
+
+
+def your_name() -> str:
+
+    try:
+        return (json.loads((Path.home() / ".referee" / "config.json").read_text(encoding="utf-8")).get("your_name") or "").strip()
+    except (OSError, ValueError):
+        return ""
+
+
+def _my_actions(me: str, meetings: List[Dict]) -> str:
+
+    """
+    Your own tasks, done and still to do, with the meeting each came from.
+    """
+
+    from todoist import is_mine
+    lines = []
+    for m in meetings:
+        for a in m["actions"]:
+            if a["text"] and is_mine(a.get("who", ""), me):
+                due = f", due {a['due']}" if a["due"] else ""
+                lines.append(f"- [{'x' if a['done'] else ' '}] {a['text']} (from {_when(m['date'])}{due})")
+    return "\n".join(lines) or "No tasks yet."

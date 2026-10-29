@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Referee",
-  "version": "1",
-  "description": "Checks your writing against the sources you have read.",
+  "version": "1.0.0",
+  "description": "Checks your writing against the sources you have read, in Word, Overleaf, Google Docs and Notion.",
   "incognito": "not_allowed",
   "permissions": [
     "storage",
@@ -55,8 +55,21 @@
         "https://www.overleaf.com/project/*"
       ],
       "js": [
+        "vendor/katex/katex.min.js",
+        "vendor/katex/typeset.js",
         "overleaf/latex.js",
         "overleaf/checker.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://docs.google.com/document/d/*",
+        "https://www.notion.so/*",
+        "https://*.notion.site/*"
+      ],
+      "js": [
+        "docs/panel.js"
       ],
       "run_at": "document_idle"
     }
@@ -66,5 +79,16 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "vendor/katex/katex.min.css",
+        "vendor/katex/fonts/*"
+      ],
+      "matches": [
+        "https://www.overleaf.com/*"
+      ]
+    }
+  ]
 }

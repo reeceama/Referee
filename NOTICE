@@ -1,0 +1,7 @@
+Referee
+Copyright 2026 Reece Mings-Alleyne and sedmoh
+
+This product includes software developed by Reece Mings-Alleyne and sedmoh.
+
+It also includes KaTeX (MIT License), in extension/vendor/katex, and uses
+SwiftMath (MIT License), fetched when the Mac app is built.

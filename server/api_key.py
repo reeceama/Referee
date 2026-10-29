@@ -8,7 +8,16 @@ variable) still works, for anyone who prefers that; a key saved from the app tak
 import os
 from typing import Dict, Optional
 
-import anthropic
+import importlib
+
+
+class _Lazy:
+    # Anthropic's library is loaded on first use: importing it took about a second of the server's start.
+    def __getattr__(self, name):
+        return getattr(importlib.import_module("anthropic"), name)
+
+
+anthropic = _Lazy()
 import keyring
 from dotenv import load_dotenv
 

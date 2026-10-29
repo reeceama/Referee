@@ -32,7 +32,8 @@ def parts():
     """
 
     found = [("server", "server", ["-m", "uvicorn", "main:app", "--port", "8000"])]
-    if sys.platform in ("darwin", "win32"):
+    # The Word helper, unless Referee for Mac says this person doesn't write in Word.
+    if sys.platform in ("darwin", "win32") and os.environ.get("REFEREE_WORD", "1") != "0":
         found.append(("helper", "word-helper", ["helper.py"]))
     return found
 
@@ -95,8 +96,13 @@ class Launcher:
             self.start(*part)
         print(f"Referee running: {', '.join(name for name, _, _ in everything)}. Logs: {self.logs}", flush=True)
         stopped_at = {}
+        parent = os.getppid()
         while not self.stopping:
             time.sleep(1)
+            # The app that started this has gone (force-quit or crashed, so it couldn't stop us):
+            # stop too, rather than leave a server behind fighting the next one for its port.
+            if os.getppid() != parent:
+                self.stop()
             for name, folder, arguments in everything:
                 if self.running[name].poll() is None:
                     continue

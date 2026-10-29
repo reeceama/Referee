@@ -7,50 +7,56 @@
     <link rel="stylesheet" href="library.css" />
   </head>
   <body>
-    <header>
-      <div class="brand">Referee library</div>
-      <span class="server" id="server" data-state="checking">Connecting…</span>
+    <!-- Laid out like Referee for Mac: a sidebar with the project as its title, then a page with its
+         own header bar. -->
+    <aside class="sidebar">
+      <div class="project-title" id="project-title">All reading</div>
+      <select id="project" aria-label="Project"><option value="">All reading</option></select>
+      <nav id="pages">
+        <a href="#reading" data-page="reading">Reading</a>
+        <a href="#references" data-page="references">References</a>
+        <a href="#projects-section" data-page="projects-section">Projects</a>
+      </nav>
+      <div class="brand-foot"><img src="../icons/icon48.png" alt="" /><span>Referee</span></div>
+    </aside>
+
+    <div class="pane">
+    <header class="page-header">
+      <h1 id="page-title">Library</h1>
+      <div class="header-actions">
+        <input id="search" type="search" placeholder="Search" aria-label="Search your reading" />
+        <select id="reports" aria-label="Reports">
+          <option value="">Reports</option>
+          <option value="trail">Research trail</option>
+        </select>
+        <button id="import" title="Import .bib or .ris">Import</button>
+        <button id="export" title="Export .bib">Export</button>
+        <input id="import-file" type="file" accept=".bib,.ris,.txt" hidden />
+      </div>
     </header>
 
     <main>
       <div class="controls">
-        <label>Project
-          <select id="project"><option value="">All reading</option></select>
-        </label>
-        <input id="search" type="search" placeholder="Search your reading" aria-label="Search your reading" />
-        <button id="proof">Proof of work report</button>
-        <button id="presubmission">Before you submit</button>
-        <button id="trail">Research trail</button>
-        <button id="export">Export .bib</button>
-        <button id="import">Import .bib or .ris</button>
-        <input id="import-file" type="file" accept=".bib,.ris,.txt" hidden />
+        <div class="segmented" role="tablist">
+          <button data-page="reading" role="tab">Reading</button>
+          <button data-page="references" role="tab">References</button>
+        </div>
+        <span class="server" id="server" data-state="checking">Connecting…</span>
+        <span class="counts" id="count"></span>
       </div>
-
-      <div id="links" class="links" hidden></div>
       <p id="summary" class="summary"></p>
 
-      <section>
-        <div class="section-head"><h2>Projects</h2></div>
-        <p class="hint">The current project, chosen in the popup, decides which sources your writing is checked against.</p>
-        <ul id="projects"></ul>
-        <div class="new-project">
-          <input id="new-project-name" placeholder="New project name" maxlength="60" />
-          <button id="new-project-create">Create project</button>
-        </div>
+      <section id="reading" class="page">
+        <h2 id="saved-heading">Saved</h2>
+        <ul id="sources"></ul>
+        <h2 id="temp-heading">Temporary · forgotten unless saved</h2>
+        <ul id="temp-sources"></ul>
+        <footer class="danger">
+          <button id="forget-everything">Forget all reading, saved and temporary</button>
+        </footer>
       </section>
 
-      <section id="api-key">
-        <div class="section-head"><h2>Anthropic API key</h2><span class="hint" id="key-status"></span></div>
-        <p class="hint" id="key-help">Referee checks claims with Claude, using your own Anthropic API key. Create one at console.anthropic.com. It's checked with Anthropic, then kept in your computer's password store (Keychain or Credential Manager), and never shown again.</p>
-        <div class="new-project">
-          <input id="key-input" type="password" placeholder="Paste your API key (sk-ant-…)" autocomplete="off" />
-          <button id="key-save">Save</button>
-          <button id="key-remove" hidden>Remove</button>
-        </div>
-        <p class="hint" id="key-problem"></p>
-      </section>
-
-      <section>
+      <section id="references" class="page">
         <div class="section-head">
           <h2>References</h2>
           <div class="tools">
@@ -68,17 +74,27 @@
         </div>
         <p class="hint" id="refs-empty">Sources appear here once they back a claim in your writing.</p>
         <ol id="ref-list"></ol>
+        <div class="section-head report-style"><h2>Report style</h2>
+          <div class="tools">
+            <select id="report-font" aria-label="Report font"></select>
+            <select id="report-size" aria-label="Report font size"></select>
+          </div>
+        </div>
       </section>
 
-      <section>
-        <div class="section-head"><h2>Reading</h2><span class="hint" id="count"></span></div>
-        <ul id="sources"></ul>
+      <section id="projects-section" class="page">
+        <h2>Projects</h2>
+        <p class="hint">The current project, chosen in the popup, decides which sources your writing is checked against.</p>
+        <ul id="projects"></ul>
+        <div class="new-project">
+          <input id="new-project-name" placeholder="New project name" maxlength="60" />
+          <button id="new-project-create">Create project</button>
+        </div>
+        <div id="links" class="links" hidden></div>
       </section>
+
     </main>
-
-    <footer class="danger">
-      <button id="forget-everything">Forget all reading, saved and temporary</button>
-    </footer>
+    </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="cite.js"></script>

@@ -32,6 +32,10 @@ final class Services {
             process.currentDirectoryURL = repo
         }
         process.arguments = ["referee.py"]
+        // The Word helper only when writing in Word (Settings → Writing).
+        var environment = ProcessInfo.processInfo.environment
+        environment["REFEREE_WORD"] = (UserDefaults.standard.string(forKey: "settingsWritingIn") ?? "word") == "word" ? "1" : "0"
+        process.environment = environment
         process.terminationHandler = { [weak self] _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                 guard let self, !self.stopping else { return }

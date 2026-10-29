@@ -27,6 +27,8 @@ final class Updater {
     }
 
     func check(manually: Bool) {
+        // Switched off on "What leaves this device": only a check asked for by hand goes out.
+        if !manually && !WordSettings.privacySwitch("update_checks") { return }
         guard let current, !busy else {
             if manually && current == nil { tell("Updates are for the downloaded app", "This copy was built from the code folder: rebuild it to update.") }
             return
@@ -64,7 +66,20 @@ final class Updater {
     }
 
     /// Release names are dates with an optional number after a full stop: 2026-10-11, 2026-10-11.2.
+    /// Releases were named by date ("2026-10-12.2") until version numbers ("v1.0.0") took over:
+    /// any version number is newer than any date, and version numbers compare part by part.
     static func isNewer(_ tag: String, than current: String) -> Bool {
+        let versioned = { (name: String) in name.hasPrefix("v") }
+        if versioned(tag) != versioned(current) { return versioned(tag) }
+        if versioned(tag) {
+            let numbers = { (name: String) in name.dropFirst().split(separator: ".").map { Int($0) ?? 0 } }
+            let new = numbers(tag), old = numbers(current)
+            for i in 0..<max(new.count, old.count) {
+                let a = i < new.count ? new[i] : 0, b = i < old.count ? old[i] : 0
+                if a != b { return a > b }
+            }
+            return false
+        }
         func parts(_ name: String) -> (String, Int) {
             let pieces = name.split(separator: ".", maxSplits: 1)
             return (String(pieces.first ?? ""), pieces.count > 1 ? Int(pieces[1]) ?? 0 : 1)

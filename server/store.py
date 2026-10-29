@@ -149,6 +149,19 @@ def expired(older_than: float) -> List[str]:
     return sorted(urls)
 
 
+def update_source(url: str, changes: Dict) -> bool:
+    """Changes a saved source's details (e.g. its title) on every passage of it."""
+    found = False
+    with _lock:
+        for passage in _passages:
+            if passage["source"].get("url") == url:
+                passage["source"].update(changes)
+                found = True
+        if found:
+            _save()
+    return found
+
+
 def stored_text(url: str) -> List[str]:
     """A saved source's passages, in order."""
     return [p["text"] for p in _passages if p["source"].get("url") == url]
@@ -163,6 +176,23 @@ def replace(url: str, passages: List[str], pages: Optional[List[int]] = None, ch
     metadata = {**old, **(changes or {})}
     forget(url)
     return add_page(metadata, passages, pages=pages)
+
+
+def passages_of(url: str) -> List[Dict]:
+    """One source's passages as stored (text, page or time, source details), for Recently Deleted."""
+    with _lock:
+        return [dict(p) for p in _passages if p["source"].get("url") == url]
+
+
+def put_back(passages: List[Dict]) -> int:
+    """A deleted source's passages, back as they were. Their vectors are worked out again, on this Mac."""
+    if not passages:
+        return 0
+    pages = [p.get("page") for p in passages]
+    times = [p.get("time") for p in passages]
+    return add_page(passages[0]["source"], [p["text"] for p in passages],
+                    pages if any(x is not None for x in pages) else None,
+                    times if any(x is not None for x in times) else None)
 
 
 def forget(url: str) -> int:

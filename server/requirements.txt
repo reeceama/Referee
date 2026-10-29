@@ -13,3 +13,4 @@ pypdf
 youtube-transcript-api
 httpx
 pywin32; sys_platform == "win32"
+mcp>=2.3,<3

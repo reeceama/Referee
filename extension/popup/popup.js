@@ -41,19 +41,33 @@ async function showSaved() {
     chrome.runtime.sendMessage({ type: "get", path: "sources" }).catch(() => null),
     chrome.runtime.sendMessage({ type: "get", path: "claims" }).catch(() => []),
   ]);
-  const sources = Array.isArray(stored) ? stored : [];
-  const cited = new Set(Array.isArray(claims)
-    ? claims.filter((c) => c.label === "supports").map((c) => c.source?.url).filter(Boolean) : []);
+  // Only the project chosen above: its saved and temporary reading. With no project, everything.
+  const project = projectSelect.value && projectSelect.value !== NEW_PROJECT ? projectSelect.value : settings.project;
+  const sources = (Array.isArray(stored) ? stored : []).filter((c) => !project || (c.project || "") === project);
+  // How many claims each source backs, shown as "Cited 3×" as in the library.
+  const cited = new Map();
+  for (const claim of Array.isArray(claims) ? claims : []) {
+    if (claim.label === "supports" && claim.source?.url) cited.set(claim.source.url, (cited.get(claim.source.url) || 0) + 1);
+  }
   const query = searchBox.value.trim().toLowerCase();
   const shown = sources
-    .filter((c) => !query || `${c.title} ${c.url} ${c.project || ""}`.toLowerCase().includes(query))
-    .sort((a, b) => (b.captured_ts || 0) - (a.captured_ts || 0));
+    .filter((c) => !query || `${c.name || ""} ${c.title} ${c.url}`.toLowerCase().includes(query))
+    .sort((a, b) => (b.captured_ts || 0) - (a.captured_ts || 0))
+    // Saved first, then temporary, under their own headings, as in the library.
+    .sort((a, b) => (a.kept === false) - (b.kept === false))
+    .slice(0, 30);
 
-  savedList.replaceChildren(...shown.slice(0, 30).map((c) => {
+  const heading = (text) => {
+    const item = document.createElement("li");
+    item.className = "group";
+    item.textContent = text;
+    return item;
+  };
+  const rows = shown.map((c) => {
     const item = document.createElement("li");
     const title = document.createElement("span");
-    title.className = "t";
-    title.textContent = c.title || c.url;
+    title.className = c.kept === false ? "t temp" : "t";
+    title.textContent = c.name || c.title || c.url;
     title.title = c.url;
     const tags = document.createElement("div");
     tags.className = "tags";
@@ -65,13 +79,11 @@ async function showSaved() {
     };
     if (c.kept === false) {
       const left = Math.max(1, Math.round(((c.captured_ts || 0) + settings.keep_minutes * 60 - Date.now() / 1000) / 60));
-      addTag(`Temporary · ${left} min left`, "temp");
-    } else {
-      addTag("Saved", "cited");
+      addTag(`${left} min left`, "temp");
     }
     addTag(c.type === "pdf" ? "PDF" : c.type === "video" ? "Video" : sourceType(c.url));
-    if (c.project) addTag(c.project);
-    if (cited.has(c.url)) addTag("Cited", "cited");
+    if (c.project && !project) addTag(c.project);  // every project shown: say which
+    if (cited.get(c.url)) addTag(`Cited ${cited.get(c.url)}×`, "cited");
     const forget = document.createElement("button");
     forget.className = "forget-one";
     forget.title = "Forget this page";
@@ -113,9 +125,14 @@ async function showSaved() {
     actions.append(forget);
     item.append(title, tags, actions);
     return item;
-  }));
+  });
+  const firstTemporary = shown.findIndex((c) => c.kept === false);
+  if (firstTemporary >= 0) rows.splice(firstTemporary, 0, heading("Temporary · forgotten unless saved"));
+  if (firstTemporary !== 0 && shown.length) rows.unshift(heading("Saved"));
+  savedList.replaceChildren(...rows);
   const kept = sources.filter((c) => c.kept !== false).length;
-  savedTitle.textContent = sources.length ? `Your reading (${kept} saved, ${sources.length - kept} temporary)` : "Your reading";
+  savedTitle.textContent = sources.length ? `Your reading · ${kept} saved` : "Your reading";
+  savedEmpty.textContent = project ? `Nothing in ${project} yet.` : "Nothing saved yet.";
   savedEmpty.hidden = sources.length > 0;
   showSaveButton(sources);
 }
@@ -281,3 +298,16 @@ setInterval(showSaved, 30000);  // keep "min left" current while the popup is op
 showStatus().then(showModeHint);
 showProject().then(showSaved);
 showServer();
+
+
+// The project as a title at the top, as in the app's sidebar.
+{
+  const select = document.getElementById("project");
+  const title = document.getElementById("project-title");
+  const show = () => { title.textContent = select.selectedOptions[0]?.textContent || ""; };
+  select.addEventListener("change", show);
+  new MutationObserver(show).observe(select, { childList: true, subtree: true, attributes: true });
+  show();
+  // Its value is set in code once the projects load, which fires no event: look again shortly.
+  [300, 1000, 2500].forEach((ms) => setTimeout(show, ms));
+}

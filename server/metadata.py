@@ -12,6 +12,8 @@ from typing import Dict, Optional
 
 import requests
 
+import privacy
+
 DOI = re.compile(r"\b(10\.\d{4,9}/[^\s\"'<>]+[^\s\"'<>.,;)\]])", re.IGNORECASE)
 META_DOI = re.compile(r'<meta[^>]+name=["\'](?:citation_doi|dc\.identifier|prism\.doi)["\'][^>]+content=["\'](?:doi:)?([^"\']+)["\']', re.IGNORECASE)
 ARXIV = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", re.IGNORECASE)
@@ -39,6 +41,8 @@ def lookup(doi: str) -> Dict:
     """
     Citation details for a DOI, in Referee's metadata fields; empty if doi.org doesn't know it.
     """
+    if not privacy.allowed("paper_details"):
+        return {}  # switched off in Settings: nothing is sent
 
     try:
         response = requests.get(f"https://doi.org/{doi}", timeout=TIMEOUT,
@@ -68,6 +72,8 @@ def retracted(doi: str) -> bool:
     """
     Whether Crossref records a retraction of this paper.
     """
+    if not privacy.allowed("paper_details"):
+        return False  # switched off in Settings: nothing is sent
 
     if doi.lower().startswith("10.48550/"):  # arXiv: not in Crossref
         return False

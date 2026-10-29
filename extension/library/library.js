@@ -55,8 +55,8 @@ function renderLinks() {
   }
   const linked = new Set(settings.links?.[project] || []);
   box.hidden = false;
-  box.innerHTML = `<span>${escapeHtml(project)} can also cite references from:</span>` + others.map((p) =>
-    `<label><input type="checkbox" value="${escapeHtml(p)}" ${linked.has(p) ? "checked" : ""}/> ${escapeHtml(p)}</label>`).join("");
+  box.innerHTML = `<h2>Also cite from</h2><p class="hint">Projects whose sources ${escapeHtml(project)} may cite as well as its own.</p>` + others.map((p) =>
+    `<label><span>${escapeHtml(p)}</span><input type="checkbox" value="${escapeHtml(p)}" ${linked.has(p) ? "checked" : ""}/></label>`).join("");
   box.querySelectorAll("input").forEach((input) => input.addEventListener("change", async () => {
     const chosen = [...box.querySelectorAll("input:checked")].map((i) => i.value);
     const saved = await chrome.runtime.sendMessage({ type: "post", path: "settings", body: { links: { ...settings.links, [project]: chosen } } });
@@ -102,25 +102,25 @@ function renderSources() {
 
   const shown = sources
     .filter((s) => inProject(s.project))
-    .filter((s) => !query || [s.title, s.site, s.author, s.url].some((v) => String(v || "").toLowerCase().includes(query)))
+    .filter((s) => !query || [s.name, s.title, s.site, s.author, s.url].some((v) => String(v || "").toLowerCase().includes(query)))
     .sort((a, b) => (readAt.get(b.url) || 0) - (readAt.get(a.url) || 0));
 
-  document.getElementById("count").textContent = `${shown.length} source${shown.length === 1 ? "" : "s"}`;
-  const list = document.getElementById("sources");
-  list.replaceChildren(...shown.map((s) => {
+  const saved = shown.filter((s) => s.kept !== false);
+  const cited = saved.filter((s) => citedCount.get(s.url)).length;
+  document.getElementById("count").textContent = `${saved.length} source${saved.length === 1 ? "" : "s"} · ${cited} cited`;
+  const row = (s) => {
     const item = document.createElement("li");
     const n = citedCount.get(s.url) || 0;
     const type = s.type === "pdf" ? "PDF" : s.type === "video" ? "Video" : "Web page";
     const read = readAt.get(s.url) ? when(readAt.get(s.url)) : s.captured_at || "";
     item.innerHTML = `
       <div class="what">
-        <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(Cite.cleanTitle(s))}</a>
+        <a class="title" href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.name || Cite.cleanTitle(s))}</a>
         <div class="meta">${escapeHtml([s.site, read].filter(Boolean).join(" · "))}</div>
         <div class="tags">
           ${s.retracted ? `<span class="tag retracted">Retracted</span>` : ""}
-          <span class="tag ${s.kept === false ? "temp" : "cited"}">${s.kept === false ? "Temporary" : "Saved"}</span>
           <span class="tag">${type}</span>
-          ${n ? `<span class="tag cited">Backs ${n} claim${n === 1 ? "" : "s"}</span>` : ""}
+          ${n ? `<span class="tag cited">Cited ${n}×</span>` : ""}
         </div>
       </div>
       <div class="row-actions">
@@ -155,8 +155,13 @@ function renderSources() {
       load();
     };
     return item;
-  }));
-  if (!shown.length) list.innerHTML = `<li class="hint">${sources.length ? "Nothing matches." : "Nothing captured yet. Read with research mode on, or while writing in Word."}</li>`;
+  };
+  const temporary = shown.filter((s) => s.kept === false);
+  document.getElementById("sources").replaceChildren(...saved.map(row));
+  document.getElementById("temp-sources").replaceChildren(...temporary.map(row));
+  document.getElementById("saved-heading").hidden = !saved.length;
+  document.getElementById("temp-heading").hidden = !temporary.length;
+  if (!shown.length) document.getElementById("sources").innerHTML = `<li class="hint">${sources.length ? "Nothing matches." : "Nothing captured yet. Read with research mode on, or while writing in Word."}</li>`;
 }
 
 // Evidence summary for the writing in this project: what the reading backs and contradicts,
@@ -181,8 +186,7 @@ function renderSummary() {
   box.innerHTML = `<strong>${backed.length} claim${backed.length === 1 ? "" : "s"} backed by your reading</strong>` +
     (against ? ` · ${against} contradicted by a source` : "") +
     (unsupported ? ` · ${unsupported} need${unsupported === 1 ? "s" : ""} a source` : "") +
-    (backed.length >= RELIANCE_MIN_CLAIMS && top / backed.length > RELIANCE_SHARE
-      ? `<span class="note">${top} of them rest on one source (${escapeHtml(Cite.cleanTitle(topSource))}). Consider backing some with others.</span>` : "");
+    "";   // no "rest on one source" warning: leaning on one set of lecture notes is normal
 }
 
 // Create, rename, delete. Renaming and deleting are done in place: prompt() and confirm()
@@ -307,7 +311,7 @@ when Referee checked them as they were written. Both are kept on this computer. 
 the writing; it is not tamper-proof.</p>
 <p class="note">To keep a copy, print this page (Cmd+P or Ctrl+P) and choose "Save as PDF".</p>
 </body></html>`;
-  window.open(URL.createObjectURL(new Blob([html], { type: "text/html" })), "_blank");
+  openReport(html);
 }
 
 async function load() {
@@ -342,7 +346,34 @@ projectSelect.onchange = () => {
   render();
 };
 searchBox.oninput = renderSources;
-document.getElementById("proof").onclick = proofOfWork;
+
+// Reports open in the font and size chosen beside the buttons (remembered), as in the Mac app.
+const REPORT_FONTS = {
+  "Times New Roman": "'Times New Roman', Times, serif",
+  "Arial": "Arial, Helvetica, sans-serif",
+  "Calibri": "Calibri, Carlito, 'Helvetica Neue', sans-serif",
+  "Georgia": "Georgia, serif",
+  "Garamond": "'EB Garamond', Garamond, 'Adobe Garamond Pro', serif",
+  "Cambria": "Cambria, Caladea, Georgia, serif",
+  "Computer Modern": "'CMU Serif', 'Latin Modern Roman', 'Computer Modern', serif",
+};
+const fontSelect = document.getElementById("report-font");
+const sizeSelect = document.getElementById("report-size");
+for (const name of Object.keys(REPORT_FONTS)) fontSelect.add(new Option(name, name));
+for (const size of [10, 11, 12, 14]) sizeSelect.add(new Option(`${size} pt`, size));
+chrome.storage.local.get(["reportFont", "reportSize"]).then(({ reportFont, reportSize }) => {
+  fontSelect.value = REPORT_FONTS[reportFont] ? reportFont : "Times New Roman";
+  sizeSelect.value = reportSize || 12;
+});
+fontSelect.onchange = sizeSelect.onchange = () =>
+  chrome.storage.local.set({ reportFont: fontSelect.value, reportSize: Number(sizeSelect.value) });
+
+function openReport(html) {
+  const css = `<style>body, body * { font-family: ${REPORT_FONTS[fontSelect.value] || REPORT_FONTS["Times New Roman"]} !important; }
+body { font-size: ${sizeSelect.value || 12}pt !important; }</style>`;
+  const styled = html.includes("</head>") ? html.replace("</head>", css + "</head>") : css + html;
+  window.open(URL.createObjectURL(new Blob([styled], { type: "text/html" })), "_blank");
+}
 
 // The other reports and Zotero files come from Referee's server, as in the Mac app's Library.
 function serverProject() {
@@ -358,11 +389,14 @@ async function serverPage(path) {
 
 async function openServerReport(page) {
   const html = await serverPage(`${page}?project=${encodeURIComponent(serverProject())}`);
-  if (html != null) window.open(URL.createObjectURL(new Blob([html], { type: "text/html" })), "_blank");
+  if (html != null) openReport(html);
 }
 
-document.getElementById("presubmission").onclick = () => openServerReport("presubmission");
-document.getElementById("trail").onclick = () => openServerReport("trail");
+document.getElementById("reports").onchange = (event) => {
+  const page = event.target.value;
+  event.target.value = "";
+  if (page === "proof") proofOfWork(); else if (page) openServerReport(page);
+};
 
 document.getElementById("export").onclick = async () => {
   const bib = await serverPage(`export?format=bibtex&project=${encodeURIComponent(serverProject())}`);
@@ -391,48 +425,6 @@ importFile.onchange = async () => {
   load();
 };
 
-// API key: checked with Anthropic and kept in the system's password store; only its last
-// four characters are ever shown.
-async function showKey() {
-  const status = await get("api-key").catch(() => null);
-  const line = document.getElementById("key-status");
-  const remove = document.getElementById("key-remove");
-  if (!status || status.error) {
-    line.textContent = "Server not running";
-    return;
-  }
-  line.textContent = status.has_key ? `Saved, ending …${status.ends}${status.source === "env" ? " (from server/.env)" : ""}` : "No key yet";
-  line.style.color = status.has_key ? "var(--cited)" : "var(--warn)";
-  document.getElementById("key-input").placeholder = status.has_key ? "Replace with a new key" : "Paste your API key (sk-ant-…)";
-  remove.hidden = !(status.has_key && status.source === "password store");
-}
-
-document.getElementById("key-save").onclick = async () => {
-  const input = document.getElementById("key-input");
-  const problem = document.getElementById("key-problem");
-  const button = document.getElementById("key-save");
-  if (!input.value.trim()) return input.focus();
-  button.disabled = true;
-  button.textContent = "Checking…";
-  const result = await chrome.runtime.sendMessage({ type: "post", path: "api-key", body: { key: input.value } });
-  button.disabled = false;
-  button.textContent = "Save";
-  problem.textContent = result?.ok ? "" : result?.reason || "Couldn't save the key.";
-  problem.style.color = "var(--warn)";
-  if (result?.ok) {
-    input.value = "";
-    toast("Key saved");
-  }
-  showKey();
-};
-document.getElementById("key-input").onkeydown = (event) => { if (event.key === "Enter") document.getElementById("key-save").click(); };
-document.getElementById("key-remove").onclick = async () => {
-  await chrome.runtime.sendMessage({ type: "delete", path: "api-key" });
-  toast("Key removed");
-  showKey();
-};
-showKey();
-
 // Forgetting everything is kept off the popup and needs a typed confirmation.
 const forgetEverything = document.getElementById("forget-everything");
 forgetEverything.onclick = async () => {
@@ -454,3 +446,37 @@ forgetEverything.onclick = async () => {
 };
 chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes.captures) load(); });
 load();
+
+
+// The sidebar's title follows the project chosen.
+{
+  const title = document.getElementById("project-title");
+  const show = () => { title.textContent = projectSelect.selectedOptions[0]?.textContent || "All reading"; };
+  projectSelect.addEventListener("change", show);
+  new MutationObserver(show).observe(projectSelect, { childList: true });
+  show();
+  // Its value is set in code once the projects load, which fires no event: look again shortly.
+  [300, 1000, 2500].forEach((ms) => setTimeout(show, ms));
+}
+
+
+// One page at a time, like Referee for Mac: the sidebar and the Reading/References switch choose it.
+{
+  const titles = { reading: "Library", references: "Library", "projects-section": "Projects" };
+  const showPage = (page) => {
+    if (!titles[page]) page = "reading";
+    document.querySelectorAll("section.page").forEach((s) => { s.hidden = s.id !== page; });
+    document.querySelectorAll("[data-page]").forEach((el) => el.classList.toggle("selected", el.dataset.page === page));
+    document.getElementById("page-title").textContent = titles[page];
+    const library = page === "reading" || page === "references";
+    document.querySelector(".controls").hidden = !library;
+    document.getElementById("summary").hidden = !library;
+    document.querySelector(".header-actions").hidden = !library;
+  };
+  document.querySelectorAll("[data-page]").forEach((el) => el.addEventListener("click", (event) => {
+    event.preventDefault();
+    history.replaceState(null, "", "#" + el.dataset.page);
+    showPage(el.dataset.page);
+  }));
+  showPage(location.hash.slice(1));
+}

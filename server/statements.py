@@ -14,8 +14,14 @@ from pydantic import BaseModel
 import bib
 from store import search, sources
 from verify import anthropic_client, MODEL
+import local_models
+import cloud_models
 
 PASSAGES = 4
+# Theorems are compared by Claude Sonnet: on 28 statements from lecture notes (21 Oct 2026) it caught
+# 14/14 real differences with 1 false alarm; Haiku caught 12/14 (missing "not all zero" and "det X ≠ 0"),
+# Qwen 2.5 7B 8/13 with 7 false alarms. No local model runnable on a Mac is that careful, so none is used.
+THEOREM_MODEL = "claude-sonnet-5-5"
 
 SYSTEM = """You compare a mathematical statement in a person's writing with the paper it cites.
 
@@ -63,6 +69,8 @@ def check(statement: str, kind: str, keys: List[str], label: str = "") -> Dict:
     if not urls:
         return {"found": False, "reason": "not_saved"}
     passages = search(statement, k=PASSAGES, urls=urls)
+    # Not pages read from a scan: their maths isn't exact enough to compare a statement against.
+    passages = [p for p in passages if p.get("page") not in (p["source"].get("scanned_pages") or [])]
     if not passages:
         return {"found": False, "reason": "not_saved"}
     numbered = "\n\n".join(f"[{i}] {p['text']}" for i, p in enumerate(passages))
@@ -71,14 +79,34 @@ def check(statement: str, kind: str, keys: List[str], label: str = "") -> Dict:
     key = hashlib.sha256(user.encode()).hexdigest()
     if key in _cache:
         return _cache[key]
-    client = anthropic_client.get()
-    if client is None:
-        return {"found": False, "reason": "no_api_key"}
-    response = client.messages.parse(
-        model=MODEL, max_tokens=2000,
-        system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user}], output_format=Comparison)
-    comparison = response.parsed_output
+    # Comparing a theorem with a paper needs a careful model, whatever checks claims: Claude or OpenAI
+    # whenever either is connected, otherwise not at all.
+    # Chosen in Settings → Checks: "auto" (Claude if connected, else ChatGPT), "claude", "openai" or "off".
+    comparison, local = None, False
+    choice = local_models._config().get("theorem_provider") or "auto"
+    if choice == "off":
+        return {"found": False, "reason": "theorems_off"}
+    cloud, client = None, None
+    if choice in ("auto", "claude"):
+        client = anthropic_client.get()
+    if client is None and choice in ("auto", "openai"):
+        cloud = next((p for p in cloud_models.PROVIDERS if cloud_models.key(p)), None)
+    if cloud:
+        reply = cloud_models.ask(cloud, SYSTEM, user, Comparison.model_json_schema(),
+                                 use_model=cloud_models.PROVIDERS[cloud].get("theorem_model"))
+    elif client:
+        response = client.messages.parse(
+            model=THEOREM_MODEL, max_tokens=2000,
+            system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": user}], output_format=Comparison)
+        comparison, reply = response.parsed_output, None
+    else:
+        return {"found": False, "reason": "no_theorem_model"}
+    if comparison is None and reply:
+        try:
+            comparison = Comparison(**reply)
+        except (TypeError, ValueError):
+            comparison = None
     if comparison is None:
         return {"found": False, "reason": "failed"}
     if comparison.passage is None or not 0 <= comparison.passage < len(passages):
@@ -86,6 +114,7 @@ def check(statement: str, kind: str, keys: List[str], label: str = "") -> Dict:
     else:
         chosen = passages[comparison.passage]
         result = {"found": True, "quote": comparison.quote, "page": chosen.get("page"), "source": chosen["source"],
-                  "differences": [d.model_dump() for d in comparison.differences]}
+                  "differences": [d.model_dump() for d in comparison.differences],
+                  "local": local}   # checked by the model on this Mac: worth a second look
     _cache[key] = result
     return result

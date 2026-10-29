@@ -14,9 +14,11 @@
   const memory = `overleaf:${project}`;
   let results = {};              // sentence -> {keys, result}
   let compared = {};             // statement -> {keys, result}
+  let ignoredNotation = [];      // notation warnings marked Ignore, without their line numbers
   let code = null;               // the code folder check: uncited libraries, stale figures
   let lines = {};                // sentence or statement -> line, for jumping to it
   let keysByUrl = {};
+  let namesByUrl = {};   // names the person gave sources, shown instead of their titles
   let timer = null;
   let running = false;
   let latest = "";
@@ -78,6 +80,7 @@
     const sources = await ask({ type: "get", path: "sources" });
     if (!Array.isArray(sources)) return;
     keysByUrl = Object.fromEntries(sources.map((s) => [s.url, s.cite_key]));
+    namesByUrl = Object.fromEntries(sources.filter((s) => s.name).map((s) => [s.url, s.name]));
     // The library changed: sentences with no support yet, and comparisons, are worth another look.
     const now = sources.map((s) => `${s.url}:${s.passages}:${s.text_from || ""}`).sort().join("|");
     if (library && now !== library) {
@@ -108,6 +111,8 @@
     lines = Object.fromEntries(stated_.map((s) => [s.statement, s.line]));
     for (const { sentence } of found) lines[sentence] ??= lineOf(sentence);
     await loadKeys();
+    // The sentences in the order written, so Evidence lists them that way.
+    ask({ type: "claims/order", body: { document: `${document.title.replace(/ - Overleaf.*$/, "")} (Overleaf)`, sentences: found.map((f) => f.sentence) } });
     const fresh = found.filter(({ sentence }) => !results[sentence]);
     const unchecked = stated_.filter((s) => !compared[s.statement] || compared[s.statement].keys.join() !== s.keys.join());
     for (const { kind, label, statement, keys } of unchecked) {
@@ -133,7 +138,7 @@
     previous = latest;
     for (const sentence of removed) delete results[sentence];
     for (const { sentence, keys } of found) if (results[sentence]) results[sentence].keys = keys;
-    if (alive()) chrome.storage.local.set({ [memory]: { results, compared, library } }).catch(() => {});
+    if (alive()) chrome.storage.local.set({ [memory]: { results, compared, library, ignoredNotation } }).catch(() => {});
     running = false;
     render(found);
     await autoInsert();
@@ -158,18 +163,22 @@
   function comparison({ keys, kind, label, result }) {
     const name = label || kind;
     if (result.reason === "not_saved") return [["warn", `Can't compare: ${keys.join(", ")} isn't saved in Referee. Save the paper to check your ${kind} against it.`]];
-    if (result.reason === "no_api_key") return [["warn", "Add an API key in Referee's settings to compare statements with papers."]];
+    if (result.reason === "theorems_off") return [];   // turned off in Referee's Settings: nothing to say
+    if (result.reason === "no_theorem_model" || result.reason === "local_model") return [["quote", `Not compared: comparing ${kind}s with papers needs Claude or ChatGPT connected in Referee's Settings → Keys. Models on your computer aren't careful enough for this yet.`]];
+    if (result.reason === "no_api_key") return [["warn", "Add your Claude or ChatGPT key in Referee's Settings → Keys to compare statements with papers."]];
     if (!result.found) return [["warn", `Couldn't find this ${kind} in ${title(result.source)}. Check you're citing the right paper, or that the saved copy includes it.`]];
     // From a page with no reading note: a nudge to check it's been read, not an error.
     const unnoted = result.noted === false
-      ? [["quote", `Not in your notes${result.page ? `: page ${result.page} of ${title(result.source)}` : ""}. Worth noting once you've read it.`]]
+      ? [["quote", `Not in your notes${result.page ? `: page ${result.page} of ${title(result.source)}` : ""}.`]]
       : [];
-    if (!result.differences?.length) return [["good", `Matches ${title(result.source)}.`], ...unnoted];
+    // Checked by the model on this computer: likelier to miss a small difference, so worth a look.
+    const local = result.local ? [["quote", "Compared by the model on your computer: check the wording against the paper too."]] : [];
+    if (!result.differences?.length) return [["good", `Matches ${title(result.source)}.`], ...local, ...unnoted];
     return result.differences.map((d) => [d.kind === "extra_condition" ? "warn" : "bad", `${KINDS[d.kind] || "Difference"}: ${d.detail}`])
-      .concat([["quote", `The paper (${name}${result.page ? `, p. ${result.page}` : ""}): ${result.quote}`]], unnoted);
+      .concat([["quote", `The paper (${name}${result.page ? `, p. ${result.page}` : ""}): ${result.quote}`]], local, unnoted);
   }
 
-  const title = (source) => (source?.title || source?.url || "a source").replace(/\s+[-|–—]\s+[^-|–—]+$/, "");
+  const title = (source) => (namesByUrl[source?.url] || source?.title || source?.url || "a source").replace(/\s+[-|–—]\s+[^-|–—]+$/, "");
 
   // What a checked sentence needs telling, if anything: [kind, message, key to copy].
   function findings(keys, result) {
@@ -189,7 +198,7 @@
       if (!keys.length) out.push(["good", `Supported by ${title(source)}. Cite it:`, key, null, null, true]);
       else if (key && !keys.includes(key)) out.push(["warn", `You cite ${keys.join(", ")}, but the reading that supports this is ${title(source)}.`, key]);
       else out.push(["good", `Supported by ${title(source)}${keys.length ? ", which you cite" : ""}.`]);
-      if (result.noted === false) out.push(["quote", `Not in your notes${result.page ? `: page ${result.page} of ${title(source)}` : ""}. Worth noting once you've read it.`]);
+      if (result.noted === false) out.push(["quote", `Not in your notes${result.page ? `: page ${result.page} of ${title(source)}` : ""}.`]);
     }
     if (result.misquote) out.push(["warn", `This quotation doesn't match the source. It says: “${result.quote}”`]);
     if (result.too_close) out.push(["warn", "Very close to the source's wording. Consider quoting or rephrasing."]);
@@ -218,10 +227,13 @@
     .quote { border-color: #8e8e93; color: #6e6e73; font-size: 12px; }
     .good { border-color: #34c759; } .warn { border-color: #ff9f0a; } .bad { border-color: #ff3b30; }
     button, a { font: inherit; font-size: 12px; margin-left: 4px; }
+    button.ignore { opacity: 0.7; font-size: 11px; }
     code { font-size: 12px; background: #f2f2f7; padding: 1px 4px; border-radius: 4px; }
     @media (prefers-color-scheme: dark) { .box { background: #2c2c2e; color: #f5f5f7; } .item { border-color: #3a3a3c; } code { background: #3a3a3c; } a { color: #64d2ff; } }
   </style><div class="box closed"><header><span>Referee</span><span class="count"></span></header><div class="hint" hidden>New citations show as “?” until refs.bib has them: export it from Referee's Library and upload it to Overleaf.</div><div class="list"></div></div>`;
   document.documentElement.append(host);
+  // KaTeX's styles in the panel, so sentences show their maths typeset.
+  Maths.css().then((css) => { const style = document.createElement("style"); style.textContent = css; shadow.prepend(style); });
   const box = shadow.querySelector(".box");
   shadow.querySelector("header").addEventListener("click", (event) => {
     if (!event.target.closest(".auto")) box.classList.toggle("closed");
@@ -236,9 +248,30 @@
 
   function render(found) {
     const order = found ? found.map((f) => f.sentence) : Object.keys(results);
-    const claims = order.filter((s) => results[s]).map((s) => [s, findings(results[s].keys, results[s].result)]).filter(([, f]) => f.length);
+    // Sentences next to each other resting on the same numbered statement, on the same page of the same
+    // source, count as one claim, as in Referee's Evidence report.
+    const claims = [];
+    let previous = null;
+    for (const s of order.filter((s) => results[s])) {
+      const r = results[s].result;
+      const same = r.match && r.statement && previous && previous.r.statement === r.statement
+        && previous.r.source?.url === r.source?.url && previous.r.page === r.page;
+      const notes = findings(results[s].keys, r);
+      if (same) {
+        const group = claims[claims.length - 1];
+        group[0] = `${group[0]} ${s}`;
+        for (const note of notes) if (!group[1].some((n) => n[0] === note[0] && n[1] === note[1])) group[1].push(note);
+        group[4].push(s);
+      } else if (notes.length) {
+        claims.push([s, notes, lines[s], undefined, [s]]);
+      }
+      previous = r.match ? { r } : null;
+    }
     const theorems = Object.entries(compared).map(([s, c]) => [s, comparison(c)]);
-    const notation = latest ? Latex.notation(latest).map((n) => [`Line ${n.line}`, [["warn", n.message]], n.line]) : [];
+    // A warning is known by its words without line numbers, so Ignore holds as lines move.
+    const notationKey = (message) => message.replace(/\bline \d+/gi, "line");
+    const notation = latest ? Latex.notation(latest).filter((n) => !ignoredNotation.includes(notationKey(n.message)))
+      .map((n) => [`Line ${n.line}`, [["warn", n.message]], n.line, notationKey(n.message)]) : [];
     const programming = !code?.folder ? [] : [
       ...(code.software || []).map((s) => [`${s.name} (used in ${s.file})`, [["warn", `Your code uses ${s.name}, which asks to be cited, but your writing doesn't cite it. Add its BibTeX to your .bib file, then cite it with`, s.key, null, s.bibtex]]]),
       ...(code.numbers || []).map((n) => [`Line ${n.line}: ${n.wrote}`, [["warn", `${n.wrote} isn't in your results. The closest is ${n.closest} in ${n.file} (updated ${n.modified}). Re-run since you wrote it?`]], n.line]),
@@ -246,13 +279,15 @@
     const all = [...theorems, ...claims, ...notation, ...programming];
     const problems = all.filter(([, f]) => f.some(([kind]) => kind === "warn" || kind === "bad")).length;
     shadow.querySelector(".hint").hidden = !insertedAny;
-    shadow.querySelector(".count").textContent = running ? "checking…" : all.length ? `${problems} to look at, ${all.length - problems} fine` : "nothing yet";
+    // After the extension is updated or reloaded, this page's panel can't reach it until the page reloads.
+    shadow.querySelector(".count").textContent = !alive() ? "reload this page"
+      : running ? "checking…" : all.length ? `${problems} to look at, ${all.length - problems} fine` : "nothing yet";
     const list = shadow.querySelector(".list");
     const section = (name, items) => (items.length ? [heading(name), ...items.map(item)] : []);
     list.replaceChildren(...section("Theorems and definitions", theorems), ...section("Claims", claims), ...section("Notation", notation), ...section("Code", programming));
   }
 
-  function item([sentence, notes, line]) {
+  function item([sentence, notes, line, notationKey, parts]) {
     {
       const item = document.createElement("div");
       item.className = "item";
@@ -267,12 +302,42 @@
       }
       const quoted = document.createElement("div");
       quoted.className = "sentence";
-      quoted.textContent = sentence.length > 120 ? `${sentence.slice(0, 117)}…` : sentence;
+      Maths.fill(quoted, Maths.shorten(sentence));
       item.append(quoted);
+      // A checked sentence that isn't a claim (part of a question, a hypothesis): the person says so,
+      // and Referee drops it here and in Evidence, and doesn't check it again.
+      if (notationKey) {
+        const ignore = document.createElement("button");
+        ignore.className = "ignore";
+        ignore.textContent = "Ignore";
+        ignore.title = "Stop showing this notation warning in this document";
+        ignore.addEventListener("click", (event) => {
+          event.stopPropagation();
+          ignoredNotation.push(notationKey);
+          chrome.storage.local.set({ [memory]: { results, compared, library, ignoredNotation } });
+          render();
+        });
+        quoted.append(" ", ignore);
+      }
+      if (results[sentence] || parts?.length > 1) {
+        const ignore = document.createElement("button");
+        ignore.className = "ignore";
+        ignore.textContent = "Ignore";
+        ignore.title = "Stop checking this sentence";
+        ignore.addEventListener("click", async () => {
+          for (const one of parts || [sentence]) {
+            await chrome.runtime.sendMessage({ type: "claims/ignore", body: { sentence: one } });
+            delete results[one];
+          }
+          chrome.storage.local.set({ [memory]: { results, compared, library, ignoredNotation } });
+          render();
+        });
+        quoted.append(" ", ignore);
+      }
       for (const [kind, message, key, search, bibtex, insertable] of notes) {
         const note = document.createElement("div");
         note.className = `note ${kind}`;
-        note.textContent = message;
+        Maths.fill(note, message);
         if (key) {
           const cite = `\\cite{${key}}`;
           const code = document.createElement("code");
@@ -312,7 +377,11 @@
 
   // Earlier results for this project, so reopening it doesn't pay for checks again.
   chrome.storage.local.get(memory, (saved) => {
-    ({ results = {}, compared = {}, library = "" } = saved[memory]?.results ? saved[memory] : { results: saved[memory] || {} });
+    ({ results = {}, compared = {}, library = "", ignoredNotation = [] } = saved[memory]?.results ? saved[memory] : { results: saved[memory] || {} });
+    // Every sentence is checked again on each visit, so the panel matches Referee now: a new source, a
+    // new note, or a better match since. Claude's answers are kept by Referee, so unchanged sentences
+    // cost no new checks; only the panel's copy is refreshed.
+    results = {};
     render();
   });
 })();

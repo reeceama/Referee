@@ -8,10 +8,21 @@ from collections import Counter, OrderedDict
 from pathlib import Path
 from typing import Literal, Optional
 
-import anthropic
+import importlib
+
+
+class _Lazy:
+    # Anthropic's library is loaded on first use: importing it took about a second of the server's start.
+    def __getattr__(self, name):
+        return getattr(importlib.import_module("anthropic"), name)
+
+
+anthropic = _Lazy()
 from pydantic import BaseModel
 
 import api_key
+import cloud_models
+import local_models
 import paths
 
 
@@ -79,6 +90,83 @@ class Verdict(BaseModel):
     quote: str
     disagrees: Optional[int] = None
     together_with: Optional[int] = None
+
+
+# Local models write slowly (about 6 tokens a second for Qwen 3 14B on an M1), and copying the
+# quote out was most of each reply. So for them each passage's sentences are numbered, the model
+# answers with a number, and the quote is taken from the passage: shorter, and always exact.
+LOCAL_PROMPT = SYSTEM_PROMPT.replace(
+    '''- "quote" must be copied word for word from the chosen passage: the shortest span that justifies your label.''',
+    '''- Each passage's sentences are numbered like [2.3] (passage 2, sentence 3). "evidence" is the number of
+  the sentence in the chosen passage that best justifies your label, such as "2.3", or "" if neutral.''')
+
+
+class LocalVerdict(BaseModel):
+    passage: Optional[int]
+    label: Literal["supports", "contradicts", "neutral"]
+    confidence: float
+    evidence: str
+    disagrees: Optional[int] = None
+    together_with: Optional[int] = None
+
+
+def numbered(candidates):
+    """Each passage split into sentences labelled [passage.sentence], and the sentences by label."""
+    blocks, sentences = [], {}
+    for i, candidate in enumerate(candidates, start=1):
+        parts = [p.strip() for p in SENTENCE_END_LOCAL.split(candidate["text"]) if p.strip()]
+        for j, part in enumerate(parts, start=1):
+            sentences[f"{i}.{j}"] = part
+        blocks.append(f"Passage {i}:\n" + " ".join(f"[{i}.{j}] {part}" for j, part in enumerate(parts, start=1)))
+    return "\n\n".join(blocks), sentences
+
+
+SENTENCE_END_LOCAL = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(\"“\[])")
+
+
+def ask_local(sentence, candidates, use_cache=True, model=None):
+    """A verdict from the local model, in Claude's shape, with the quote taken from the passage."""
+    passages, sentences = numbered(candidates)
+    user = f"Sentence:\n{sentence}\n\n{passages}"
+    model = model or local_models.settings()["ollama_model"]
+    key = cache.key(LOCAL_PROMPT, user) + f":ollama:{model}"
+    cached = cache.get(key) if use_cache else None
+    if cached is not None:
+        return cached
+    reply = local_models.ask_ollama(LOCAL_PROMPT, user, LocalVerdict.model_json_schema(), model=model)
+    try:
+        local = LocalVerdict(**reply) if reply else None
+    except (TypeError, ValueError):
+        return None
+    if local is None:
+        return None
+    label = local.evidence.strip().strip("[]")
+    quote = sentences.get(label, "")
+    number, _, line = label.partition(".")
+    if quote and len(quote.split()) < MIN_QUOTE_WORDS and line.isdigit():
+        # A very short sentence: quote it with the one after, so the quote shows enough.
+        quote = f"{quote} {sentences.get(f'{number}.{int(line) + 1}', '')}".strip()
+    passage = local.passage if local.passage else (int(number) if quote and number.isdigit() else None)
+    verdict = Verdict(passage=passage, label=local.label, confidence=local.confidence, quote=quote,
+                      disagrees=local.disagrees, together_with=local.together_with)
+    cache.put(key, verdict)
+    return verdict
+
+
+def ask_cloud(provider, user, use_cache=True):
+    """A verdict from OpenAI, with the same prompt and reply shape as Claude's."""
+    key = cache.key(SYSTEM_PROMPT, user) + f":{provider}:{cloud_models.model(provider)}"
+    cached = cache.get(key) if use_cache else None
+    if cached is not None:
+        return cached
+    reply = cloud_models.ask(provider, SYSTEM_PROMPT, user, Verdict.model_json_schema())
+    try:
+        verdict = Verdict(**reply) if reply else None
+    except (TypeError, ValueError):
+        return None
+    if verdict is not None:
+        cache.put(key, verdict)
+    return verdict
 
 
 class VerdictCache:
@@ -258,7 +346,22 @@ def wrong_numbers(sentence, passage):
     found = {n.replace(",", "") for n in NUMBER.findall(passage)}
     if not found:
         return []
-    return [n for n in NUMBER.findall(sentence) if n.replace(",", "") not in found]
+    # Numbers that point somewhere rather than state a figure aren't checked: "Definition 4.42",
+    # "Thm. 2.12(c)", "F1", "(4.2)", "p. 17", "Section 4", "Question 2", and indices like v_1 or c_n.
+    # Nor maths ($n-1$, $\\dim V = 2$): a formula isn't a figure the source should print as it stands.
+    sentence = REFERENCES.sub(" ", re.sub(r"\$[^$]*\$|\\\(.*?\\\)", " ", sentence))
+    return [n.rstrip(",") for n in NUMBER.findall(sentence) if n.replace(",", "") not in found]
+
+
+REFERENCES = re.compile(
+    r"\b(?:Def(?:inition)?|Defn|Thm|Theorem|Lem(?:ma)?|Prop(?:osition)?|Cor(?:ollary)?|Fact|Ex(?:ample)?|Exercise|Rem(?:ark)?"
+    r"|Eq(?:uation)?|Fig(?:ure)?|Sec(?:tion)?|Ch(?:apter)?|Question|Q|Part|Step|Case|Lecture|Week|Problem|Appendix"
+    r"|pp?|page)s?\.?\s*~?\s*\d+(?:\.\d+)*(?:\s*\([a-z]+\))?"
+    r"|\b[A-Z]\d+\b"                      # F1, Q2, A3: labels
+    r"|\(\d+(?:\.\d+)+\)"                 # (4.2): an equation number
+    r"|[_^]\{?\d+\}?"                       # v_1, x^2 in LaTeX
+    r"|(?<=[A-Za-z])\d+",                    # v1, x2 as plain text
+    re.I)
 
 
 def quote_changes(quote, source_text):
@@ -325,7 +428,21 @@ def _verified(sentence, candidates, threshold, use_cache=True):
     user = f"Sentence:\n{sentence}\n\n{passages}"
 
     try:
-        result = call_llm(SYSTEM_PROMPT, user, use_cache)
+        chosen = local_models.provider()
+        if chosen == "ollama":
+            result = ask_local(sentence, candidates, use_cache)
+        elif not local_models.online() and local_models.fallback_model():
+            # Offline: the model on this Mac checks instead, until the connection is back.
+            result = ask_local(sentence, candidates, use_cache, model=local_models.fallback_model())
+        elif chosen in cloud_models.PROVIDERS:
+            result = ask_cloud(chosen, user, use_cache)
+        else:
+            result = call_llm(SYSTEM_PROMPT, user, use_cache)
+    except anthropic.APIConnectionError as e:
+        print(f"[verify] couldn't reach Anthropic: {e}")
+        local_models.went_offline()
+        model = local_models.fallback_model()
+        result = ask_local(sentence, candidates, use_cache, model=model) if model else None
     except anthropic.APIError as e:
         print(f"[verify] API error: {e}")  # shows in the uvicorn terminal
         return None

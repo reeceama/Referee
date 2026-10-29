@@ -65,7 +65,7 @@ def server_parts():
     references = client.get("/references?project=all&style=apa", headers=headers).json()
     check("reference list builds", isinstance(references.get("entries"), list) and references.get("heading") == "References")
     report = client.get("/report?project=all", headers=headers).text
-    check("proof-of-work report builds", "Proof of work" in report and "Waggle dance" in report)
+    check("research trail builds", "Research trail" in report and "Waggle dance" in report)
     client.post("/warnings", json={"document": "Essay.docx", "issues": [{"entry": "A claim.", "note": "Your source says otherwise."}]}, headers=headers)
     check("Word warnings reach the library", client.get("/warnings", headers=headers).json()["Essay.docx"]["issues"][0]["note"] == "Your source says otherwise.")
     client.post("/highlights", json={"url": "https://referee.test/bees", "text": "The angle of the waggle run relative to vertical shows the direction"}, headers=headers)

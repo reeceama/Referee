@@ -1,0 +1,122 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "referee",
+  "title": "Referee",
+  "description": "Search your notes, sources and reading in Referee, and save notes, links and AI use without switching apps.",
+  "icon": "referee.png",
+  "author": "reeceama",
+  "license": "MIT",
+  "categories": [
+    "Productivity"
+  ],
+  "commands": [
+    {
+      "name": "open-search",
+      "title": "Search Referee",
+      "description": "Referee's own search window, with what you typed",
+      "mode": "no-view",
+      "arguments": [
+        {
+          "name": "q",
+          "placeholder": "Search",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "open-capture",
+      "title": "Quick Capture",
+      "description": "Referee's own quick capture window",
+      "mode": "no-view"
+    },
+    {
+      "name": "research-mode",
+      "title": "Toggle Research Mode",
+      "description": "Start or stop saving the pages you read to the current project",
+      "mode": "no-view"
+    },
+    {
+      "name": "check-selection",
+      "title": "Check Selected Text",
+      "description": "Whether your reading backs the sentence selected in any app, with the source and citation",
+      "mode": "view"
+    },
+    {
+      "name": "new-note",
+      "title": "New Note",
+      "description": "A titled note in the current project",
+      "mode": "view"
+    },
+    {
+      "name": "save-link",
+      "title": "Save Link",
+      "description": "Save a page as a source in the current project: the one typed, or the page open in your browser",
+      "mode": "no-view",
+      "arguments": [
+        {
+          "name": "url",
+          "placeholder": "Link",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "log-ai-use",
+      "title": "Log AI Use",
+      "description": "Note an AI use for the current project's disclosure",
+      "mode": "view"
+    },
+    {
+      "name": "switch-project",
+      "title": "Switch Project",
+      "description": "Change Referee's current project",
+      "mode": "view"
+    },
+    {
+      "name": "library",
+      "title": "Library",
+      "description": "The current project's saved sources",
+      "mode": "view"
+    },
+    {
+      "name": "evidence",
+      "title": "Evidence",
+      "description": "Each checked claim in your writing and what backs it",
+      "mode": "view"
+    },
+    {
+      "name": "notes",
+      "title": "Notes",
+      "description": "The current project's notes",
+      "mode": "view"
+    },
+    {
+      "name": "meetings",
+      "title": "Meetings",
+      "description": "The current project's meetings",
+      "mode": "view"
+    },
+    {
+      "name": "ai-use",
+      "title": "AI Use",
+      "description": "The current project's log of AI use",
+      "mode": "view"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.80.0"
+  },
+  "devDependencies": {
+    "@raycast/utils": "^1.16.0",
+    "@types/node": "^20.8.10",
+    "@types/react": "^18.3.3",
+    "typescript": "^5.4.5"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint"
+  }
+}

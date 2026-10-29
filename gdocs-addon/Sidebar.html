@@ -1,0 +1,196 @@
+<!doctype html>
+<html>
+<head>
+<base target="_top">
+<style>
+  /* The same design as Referee for Mac: small capital labels, thin lines, blue for actions. */
+  :root { color-scheme: light dark; --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --field: rgba(0,0,0,.05);
+          --accent: #007aff; --good: #248a3d; --warn: #c93400; --bad: #d70015; }
+  @media (prefers-color-scheme: dark) { :root { --text: #f5f5f7; --muted: #98989d; --line: rgba(255,255,255,.1);
+          --field: rgba(255,255,255,.07); --accent: #0a84ff; --good: #30d158; --warn: #ff9f0a; --bad: #ff453a; } }
+  body { font: 13px -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); margin: 0; padding: 14px; }
+  h1 { font: 400 22px Georgia, serif; margin: 0 0 2px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .label { font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 16px 0 6px; }
+  .item { padding: 9px 0; border-top: 1px solid var(--line); }
+  .sentence { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .note { padding-left: 8px; border-left: 3px solid; margin-top: 4px; }
+  .good { border-color: var(--good); } .warn { border-color: var(--warn); } .bad { border-color: var(--bad); }
+  button { font: inherit; font-size: 12px; border: 0; border-radius: 6px; padding: 3px 9px; background: var(--field); color: var(--text); cursor: pointer; margin: 4px 4px 0 0; }
+  button.primary { background: var(--accent); color: #fff; }
+  input { font: inherit; width: 100%; box-sizing: border-box; padding: 6px 8px; border: 0; border-radius: 6px; background: var(--field); color: var(--text); }
+  code { font-size: 12px; background: var(--field); padding: 1px 4px; border-radius: 4px; }
+  label { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Referee</h1>
+<div class="muted" id="status">Starting…</div>
+
+<div id="pair" hidden>
+  <div class="label">Pair with your Mac</div>
+  <p class="muted">In Referee on your Mac, open Settings → Writing → Google Docs and copy the pairing code. Paste it here once.</p>
+  <input id="code" placeholder="Pairing code">
+  <button class="primary" id="save-code">Pair</button>
+</div>
+
+<div id="main" hidden>
+  <label class="muted"><input type="checkbox" id="mark" checked style="width:auto"> Mark sentences in the document</label>
+  <label class="muted"><input type="checkbox" id="auto" style="width:auto"> Add citations automatically</label>
+  <button id="remove">Remove marks</button>
+  <div class="label">Claims</div>
+  <div id="list"><p class="muted">Write a few sentences: each is checked against your reading.</p></div>
+</div>
+
+<script>
+  var SERVER = 'http://localhost:8000';
+  var EVERY = 8000;
+  var pairing = '', results = {}, latest = '', running = false, doc = {};
+  var ABBREVIATIONS = ['e.g.', 'i.e.', 'et al.', 'cf.', 'Fig.', 'Eq.', 'vs.', 'approx.', 'resp.', 'p.', 'pp.', 'No.', 'Dr.', 'Prof.'];
+
+  function call(name) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+      runner[name].apply(runner, args);
+    });
+  }
+
+  function ask(path, body) {
+    return fetch(SERVER + '/' + path, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json', 'X-Referee-Pairing': pairing },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) { if (r.status === 403) throw new Error('pairing'); return r.json(); });
+  }
+
+  function sentences(text) {
+    var found = [];
+    text.split(/\n+/).forEach(function (paragraph) {
+      var flat = paragraph.replace(/^\s*([*•◦▪-]|\d+[.)])\s+/, '').replace(/\s+/g, ' ').trim();
+      if (flat.split(' ').length < 5 || !/[.!?]["”)]?$/.test(flat)) return;
+      ABBREVIATIONS.forEach(function (a) { flat = flat.split(a).join(a.replace(/\./g, '․')); });
+      flat = flat.replace(/(\d)\.(\d)/g, '$1․$2');
+      flat.split(/(?<=[.!?]["”)]?)\s+(?=[A-Z"“(])/).forEach(function (part) {
+        var s = part.replace(/․/g, '.').trim();
+        if (s.split(' ').length >= 5) found.push(s);
+      });
+    });
+    return found;
+  }
+
+  function kindOf(result) {
+    if (!result.match) return result.needs_source ? 'warn' : null;
+    if (result.label === 'contradicts') return 'contradicts';
+    if (result.misquote || result.too_close) return 'warn';
+    return result.label === 'supports' ? 'supports' : null;
+  }
+
+  function look() {
+    if (running) return;
+    running = true;
+    call('readDocument').then(function (d) {
+      doc = d;
+      if (d.text === latest) { running = false; return; }
+      latest = d.text;
+      var found = sentences(d.text);
+      var fresh = found.filter(function (s) { return !results[s]; });
+      setStatus(fresh.length ? 'Checking ' + fresh.length + '…' : 'Up to date');
+      return fresh.reduce(function (chain, sentence) {
+        return chain.then(function () {
+          return ask('check', { sentence: sentence, document: d.title + ' (Google Docs)' }).then(function (result) {
+            results[sentence] = result;
+            render(found);
+            return after(sentence, result);
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        Object.keys(results).forEach(function (s) { if (found.indexOf(s) < 0) delete results[s]; });
+        render(found);
+        setStatus('Up to date');
+        running = false;
+      });
+    }).catch(function (error) {
+      running = false;
+      if (String(error).indexOf('pairing') >= 0) { showPairing('That pairing code isn’t right, or Referee has a new one.'); return; }
+      setStatus('Referee isn’t running on your Mac. Open it, and this panel will carry on.');
+    });
+  }
+
+  /** What happens in the document once a sentence is checked: its mark, and a citation if chosen. */
+  function after(sentence, result) {
+    var kind = kindOf(result);
+    var steps = [];
+    if (kind && document.getElementById('mark').checked) steps.push(call('markSentences', [{ sentence: sentence, kind: kind }]));
+    if (document.getElementById('auto').checked && result.label === 'supports' && result.cite)
+      steps.push(call('insertCitation', sentence, result.cite));
+    return Promise.all(steps).catch(function () {});
+  }
+
+  function setStatus(text) { document.getElementById('status').textContent = text; }
+
+  function render(order) {
+    var list = document.getElementById('list');
+    list.innerHTML = '';
+    var shown = 0;
+    order.forEach(function (sentence) {
+      var r = results[sentence];
+      if (!r) return;
+      var kind = kindOf(r);
+      if (!kind) return;
+      shown++;
+      var item = document.createElement('div'); item.className = 'item';
+      var quoted = document.createElement('div'); quoted.className = 'sentence';
+      quoted.textContent = sentence.length > 120 ? sentence.slice(0, 117) + '…' : sentence;
+      item.appendChild(quoted);
+      var note = document.createElement('div');
+      note.className = 'note ' + (kind === 'supports' ? 'good' : kind === 'contradicts' ? 'bad' : 'warn');
+      var title = (r.source && (r.source.name || r.source.title)) || 'a source';
+      if (kind === 'supports') note.textContent = 'Supported by ' + title + (r.page ? ', p. ' + r.page : '') + '.';
+      else if (kind === 'contradicts') note.textContent = 'Your source says otherwise: “' + r.quote + '” (' + title + ')';
+      else if (!r.match) note.textContent = 'Reads like a claim that needs a citation, but nothing you’ve read supports it.';
+      else if (r.misquote) note.textContent = 'This quotation doesn’t match the source. It says: “' + r.quote + '”';
+      else note.textContent = 'Very close to the source’s wording. Consider quoting or rephrasing.';
+      if (kind === 'supports' && r.cite) {
+        var code = document.createElement('code'); code.textContent = r.cite;
+        var insert = document.createElement('button'); insert.textContent = 'Insert';
+        insert.onclick = function () {
+          call('insertCitation', sentence, r.cite).then(function (how) {
+            insert.textContent = how === 'ok' ? 'Inserted' : how === 'already cited' ? 'Already cited' : 'Couldn’t find it';
+            insert.disabled = true;
+          });
+        };
+        note.appendChild(document.createTextNode(' ')); note.appendChild(code); note.appendChild(insert);
+      }
+      item.appendChild(note);
+      list.appendChild(item);
+    });
+    if (!shown) list.innerHTML = '<p class="muted">Nothing to look at yet.</p>';
+  }
+
+  function showPairing(message) {
+    document.getElementById('main').hidden = true;
+    document.getElementById('pair').hidden = false;
+    setStatus(message || 'Not paired with your Mac yet.');
+  }
+
+  document.getElementById('save-code').onclick = function () {
+    pairing = document.getElementById('code').value.trim();
+    call('setPairing', pairing).then(start);
+  };
+  document.getElementById('remove').onclick = function () {
+    call('removeMarks').then(function (n) { setStatus(n ? 'Removed ' + n + ' marks.' : 'No marks to remove.'); });
+  };
+
+  function start() {
+    if (!pairing) { showPairing(); return; }
+    document.getElementById('pair').hidden = true;
+    document.getElementById('main').hidden = false;
+    look();
+    setInterval(look, EVERY);
+  }
+
+  call('getPairing').then(function (code) { pairing = code; start(); });
+</script>
+</body>
+</html>

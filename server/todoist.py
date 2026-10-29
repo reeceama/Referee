@@ -1,4 +1,7 @@
-"""Meeting action points in Todoist, both ways.
+"""Todoist's connection: its token, your name, and whose action points are yours. The syncing
+itself, for Todoist and the other to-do apps, is in tasks.py.
+
+Meeting action points in Todoist, both ways.
 
 Your own action points (their "who" is your name, "me" or everyone) become tasks in a Todoist
 project named after the Referee project, with their due dates. Ticking one off in either place
@@ -12,18 +15,16 @@ alone in Referee and no longer synced.
 
 import json
 import re
-import threading
-import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import keyring
 import requests
+from datetime import datetime, timedelta
 
 API = "https://api.todoist.com/api/v1"
 SERVICE, ACCOUNT = "Referee", "todoist-token"
 CONFIG = Path.home() / ".referee" / "config.json"
-EVERY = 180  # seconds between syncs; a meeting change syncs straight away
 TIMEOUT = 15
 
 
@@ -78,116 +79,59 @@ def disconnect() -> None:
 def is_mine(who: str, name: str) -> bool:
 
     """
-    "Reece", "Reece and Sam", "me", "everyone": yours. "Sam", "": not.
+    "Reece", "Reece and Sam", "me", "everyone", "" (no one named: action points no longer have a
+    "who" field, so they're yours): yours. "Sam": not.
     """
 
     people = [p.strip().lower() for p in re.split(r",|&|/|\band\b", who or "") if p.strip()]
+    if not people:
+        return True
     mine = {"me", "everyone", "all", "all of us", "whole group"}
     if name:
         mine |= {name.lower(), name.split()[0].lower()}
     return any(p in mine for p in people)
 
 
-class Sync:
+
+def dated() -> List[Dict]:
 
     """
-    Keeps your action points and their Todoist tasks in step, in the background.
+    Open Todoist tasks with due dates, soonest first: [{"id", "content", "due"}], for choosing which
+    one is a project's deadline. Empty when Todoist isn't connected.
     """
 
-    def __init__(self, meetings):
-
-        self.meetings = meetings
-        self.wake = threading.Event()
-        self.projects: Dict[str, str] = {}  # Todoist project name -> id
-        self.last = {"at": None, "error": None, "tasks": 0}
-
-    def start(self) -> None:
-
-        threading.Thread(target=self._loop, daemon=True).start()
-
-    def soon(self) -> None:
-
-        self.wake.set()
-
-    def _loop(self) -> None:
-
+    key = token()
+    if not key:
+        return []
+    found, cursor = [], None
+    try:
         while True:
-            self.wake.wait(EVERY)
-            self.wake.clear()
-            time.sleep(2)  # let a run of edits settle
-            try:
-                self.run()
-            except requests.RequestException as error:
-                self.last["error"] = f"Couldn't reach Todoist ({type(error).__name__})."
+            page = _call("GET", "tasks", key, params={"cursor": cursor} if cursor else {}).json()
+            for task in page.get("results", []):
+                due = (task.get("deadline") or {}).get("date") or (task.get("due") or {}).get("date")
+                if due:
+                    found.append({"id": task["id"], "content": task.get("content", ""), "due": due[:10]})
+            cursor = page.get("next_cursor")
+            if not cursor:
+                break
+    except (requests.RequestException, ValueError):
+        return []
+    return sorted(found, key=lambda t: t["due"])
 
-    def _project(self, key: str, name: str) -> str:
 
-        if not self.projects:
-            cursor = None
-            while True:
-                page = _call("GET", "projects", key, params={"cursor": cursor} if cursor else {}).json()
-                self.projects.update({p["name"]: p["id"] for p in page.get("results", [])})
-                cursor = page.get("next_cursor")
-                if not cursor:
-                    break
-        if name not in self.projects:
-            self.projects[name] = _call("POST", "projects", key, json={"name": name}).json()["id"]
-        return self.projects[name]
+def due_of(task_id: str) -> Optional[str]:
 
-    def run(self) -> None:
+    """
+    One task's due date ("2026-11-23"), or None if it has none, is done, or Todoist can't be reached.
+    """
 
-        key = token()
-        if not key:
-            return
-        name = your_name()
-        changed = set()
-        synced = 0
-        for meeting in self.meetings.items:
-            for action in meeting.get("actions", []):
-                if not action.get("text") or action.get("todoist_gone"):
-                    continue
-                task_id = action.get("todoist_id")
-                due = action.get("due") or ""
-                if not task_id:
-                    if action.get("done") or not is_mine(action.get("who", ""), name):
-                        continue
-                    body = {"content": action["text"],
-                            "description": f"From {meeting.get('title') or 'a meeting'} ({meeting.get('date')}): referee://meeting/{meeting['id']}",
-                            "project_id": self._project(key, meeting.get("project") or "Referee")}
-                    if due:
-                        body["due_string"] = due
-                    response = _call("POST", "tasks", key, json=body)
-                    if not response.ok and due:  # a due date Todoist can't read: add it without one
-                        body.pop("due_string")
-                        response = _call("POST", "tasks", key, json=body)
-                    response.raise_for_status()
-                    action["todoist_id"], action["todoist_sent"] = response.json()["id"], [action["text"], due]
-                    changed.add(meeting.get("project") or "")
-                    synced += 1
-                    continue
-                response = _call("GET", f"tasks/{task_id}", key)
-                if response.status_code == 404 or (response.ok and response.json().get("is_deleted")):
-                    action["todoist_gone"] = True  # deleted in Todoist: stop syncing it
-                    changed.add(meeting.get("project") or "")
-                    continue
-                response.raise_for_status()
-                task = response.json()
-                done_there = bool(task.get("completed_at") or task.get("checked"))
-                synced += 1
-                if done_there and not action.get("done"):
-                    action["done"] = True
-                    changed.add(meeting.get("project") or "")
-                elif action.get("done") and not done_there:
-                    _call("POST", f"tasks/{task_id}/close", key).raise_for_status()
-                elif not action.get("done") and action.get("todoist_sent") != [action["text"], due]:
-                    body = {"content": action["text"], **({"due_string": due} if due else {})}
-                    _call("POST", f"tasks/{task_id}", key, json=body).raise_for_status()
-                    action["todoist_sent"] = [action["text"], due]
-                    changed.add(meeting.get("project") or "")
-        if changed:
-            self.meetings._save(changed)  # also rewrites the workspace's who-did-what
-        self.last = {"at": time.time(), "error": None, "tasks": synced}
-
-    def status(self) -> Dict:
-
-        return {"connected": bool(token()), "name": your_name(), **self.last}
+    key = token()
+    if not key:
+        return None
+    try:
+        task = _call("GET", f"tasks/{task_id}", key).json()
+    except (requests.RequestException, ValueError):
+        return None
+    if task.get("checked") or task.get("completed_at"):
+        return None
+    return ((task.get("deadline") or {}).get("date") or (task.get("due") or {}).get("date") or "")[:10] or None

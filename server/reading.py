@@ -26,10 +26,30 @@ class ReadingSettings:
         self.keep_minutes: int = data.get("keep_minutes", KEEP_MINUTES)
         # project -> other projects whose references it may also use
         self.links: Dict[str, List[str]] = data.get("links", {})
+        # Archived projects: out of every menu, with everything in them kept.
+        self.archived: List[str] = data.get("archived", [])
 
     def as_dict(self) -> Dict:
 
-        return {"project": self.project, "projects": self.projects, "keep_minutes": self.keep_minutes, "links": self.links}
+        return {"project": self.project, "projects": self.projects, "keep_minutes": self.keep_minutes, "links": self.links,
+                "archived": self.archived}
+
+    def archive(self, name: str, archived: bool) -> Dict:
+
+        """
+        Takes a project out of the menus (or puts it back). Nothing in it is changed or removed.
+        """
+
+        if archived and name in self.projects:
+            self.projects = [p for p in self.projects if p != name]
+            self.archived = list(dict.fromkeys(self.archived + [name]))
+            if self.project == name:
+                self.project = ""
+        elif not archived and name in self.archived:
+            self.archived = [p for p in self.archived if p != name]
+            self.projects = list(dict.fromkeys(self.projects + [name]))
+        self.path.write_text(json.dumps(self.as_dict()), encoding="utf-8")
+        return self.as_dict()
 
     def rename(self, old: str, new: str) -> Dict:
 
@@ -39,6 +59,7 @@ class ReadingSettings:
 
         self.projects = [new if p == old else p for p in self.projects if new or p != old]
         self.projects = list(dict.fromkeys(p for p in self.projects if p))
+        self.archived = [new if p == old else p for p in self.archived if new or p != old]
         if self.project == old:
             self.project = new
         links = {}
@@ -67,6 +88,7 @@ class ReadingSettings:
             self.project = (changes["project"] or "").strip()
             if self.project and self.project not in self.projects:
                 self.projects.append(self.project)
+            self.archived = [p for p in self.archived if p != self.project]   # choosing one brings it back
         if "projects" in changes:
             self.projects = [p for p in changes["projects"] if p]
         if "links" in changes:

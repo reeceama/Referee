@@ -92,13 +92,32 @@ def run():
         match = verify(row.sentence, [{"text": row.passage, "source": {}}], threshold=0, use_cache=False)
         return (match["label"], match["confidence"]) if match else ("neutral", 0.0)
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    import local_models
+    chosen = local_models.provider()
+    # Local models run one check at a time on this computer; the API takes several at once.
+    with ThreadPoolExecutor(max_workers=8 if chosen == "claude" else 1) as pool:
         verdicts = list(pool.map(check, df.itertuples()))
     df["pred"] = [label for label, _ in verdicts]
     df["confidence"] = [conf for _, conf in verdicts]
-    df.to_csv(RESULTS_CSV, index=False)
-    print(f"Wrote {len(df)} results to {RESULTS_CSV}")
+    out = results_csv()
+    df.to_csv(out, index=False)
+    print(f"Wrote {len(df)} results to {out}")
     print(f"Raw accuracy (no threshold): {(df['pred'] == df['label']).mean():.2f}")
+
+
+def results_csv():
+
+    """
+    eval_results.csv for Claude (the published benchmark); eval_results_<provider>.csv otherwise,
+    chosen with REFEREE_AI_PROVIDER=ollama (and REFEREE_OLLAMA_MODEL).
+    """
+
+    import local_models
+    chosen = local_models.provider()
+    if chosen == "claude":
+        return RESULTS_CSV
+    name = chosen if chosen != "ollama" else f"ollama_{local_models.settings()['ollama_model'].replace(':', '_')}"
+    return f"eval_results_{name}.csv"
 
 
 def wilson(successes, n, z=1.96):
@@ -141,7 +160,7 @@ def metrics_at(df, threshold):
 
 def analyse():
 
-    df = pd.read_csv(RESULTS_CSV)
+    df = pd.read_csv(results_csv())
     thresholds = sorted(set(df["confidence"]) | {0.5, 0.6, 0.7, 0.8, 0.9})
     table = pd.DataFrame([metrics_at(df, t) for t in thresholds if t > 0])
     print(table.round(3).to_string(index=False))
@@ -173,8 +192,9 @@ def analyse():
     ax.set_ylabel("Precision")
     ax.set_title("Verifier on SciFact (95% Wilson CI)")
     fig.tight_layout()
-    fig.savefig(PLOT_PNG, dpi=150)
-    print(f"\nSaved plot to {PLOT_PNG}")
+    plot = PLOT_PNG if results_csv() == RESULTS_CSV else results_csv().replace("eval_results", "eval_pr").replace(".csv", ".png")
+    fig.savefig(plot, dpi=150)
+    print(f"\nSaved plot to {plot}")
 
 
 if __name__ == "__main__":

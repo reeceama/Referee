@@ -127,6 +127,10 @@ const Latex = (() => {
   function prose(text) {
     let t = body(text).replace(/(^|[^\\])%.*$/gm, "$1");                       // comments
     t = t.replace(new RegExp(`\\\\begin\\{(${SKIPPED})\\*?\\}[\\s\\S]*?\\\\end\\{\\1\\*?\\}`, "g"), " ");
+    // A block quotation (quote or quotation environment) is a quotation, as if in quotation marks: each of
+    // its sentences is checked word for word against the source, and none counts as too close to it.
+    t = t.replace(/\\begin\{(quote|quotation)\}([\s\S]*?)\\end\{\1\}/g, (_, __, body) =>
+      "\n\n" + body.trim().split(/(?<=[.!?])\s+/).map((part) => `"${part.trim()}"`).join(" ") + "\n\n");
     t = t.replace(/\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]/g, " ");                  // display maths
     t = t.replace(/\\(?:part|chapter|(?:sub)*section|paragraph|caption|title|author)\*?(?:\[[^\]]*\])?\{[^}]*\}/g, "\n\n");
     t = t.replace(/\\item\b|\\(?:begin|end)\{[^}]*\}(?:\[[^\]]*\])?/g, "\n\n");

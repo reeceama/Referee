@@ -138,6 +138,19 @@ def finished_sentences(text: str) -> List[Dict]:
 QUOTED = re.compile(r'"[^"]{3,}"|“[^”]{3,}”')
 
 
+def not_noted(result: Dict) -> str:
+
+    """
+    A hint, not a warning: the supporting page isn't in the person's reading notes. Only given in
+    projects that use notes; empty otherwise.
+    """
+
+    if result.get("label") != "supports" or result.get("noted") is not False:
+        return ""
+    where = f"page {result['page']} of " if result.get("page") else ""
+    return f" Not in your notes: {where}{citations.clean_title(result.get('source') or {})}."
+
+
 def notes_for(result: Dict, sentence: str = "") -> List[str]:
 
     """
@@ -179,9 +192,6 @@ def notes_for(result: Dict, sentence: str = "") -> List[str]:
     year = re.match(r"\d{4}", str(source.get("date") or ""))
     if result["label"] == "supports" and year and time.localtime().tm_year - int(year.group()) > OLD_SOURCE_YEARS:
         notes.append(f"This source is from {year.group()}. Check whether newer evidence agrees.")
-    if result["label"] == "supports" and result.get("noted") is False:  # only in projects that use Notes
-        where = f"page {result['page']} of " if result.get("page") else ""
-        notes.append(f"Not in your notes: {where}{citations.clean_title(source)}. Worth noting once you've read it.")
     return [COMMENT_PREFIX + note for note in notes]
 
 
@@ -291,7 +301,9 @@ class Helper:
         settings = self.settings.load()
         state = self.state.get(name)
         checked = set(state["checked"])
-        fresh = [s for s in finished_sentences(text) if s["sentence"] not in checked]
+        finished = finished_sentences(text)
+        self.post("/claims/order", {"document": Path(name).name, "sentences": [s["sentence"] for s in finished]})
+        fresh = [s for s in finished if s["sentence"] not in checked]
         if not fresh:
             return
 
@@ -334,7 +346,8 @@ class Helper:
                     continue
                 if not settings["auto_cite"]:
                     note = (f"Supported by {citations.clean_title(result.get('source') or {})}. "
-                            f"Suggested citation: {suggested}. Type it at the end of the sentence and Referee adds the reference.")
+                            f"Suggested citation: {suggested}. Type it at the end of the sentence and Referee adds the reference."
+                            + not_noted(result))
                     if (start, note) not in existing:
                         self.word.comment(start, end, note)
                     continue
