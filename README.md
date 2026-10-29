@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>Checks your writing against what you've read.</b><br>
-  Every claim matched to the source and page that back it, in Word, Google Docs, Overleaf, Notion, Obsidian, R Markdown and Quarto, with the AI running on your Mac if you choose.
+  Every claim matched to the source and page that back it, in Word, Google Docs, Overleaf, Notion, Obsidian, R Markdown and Quarto. Never writes for you.
 </p>
 
 <p align="center">
@@ -81,7 +81,7 @@ Banking, payment, login and account pages, email, social media, search results a
 | Too close | Wording copied from a source without quotation marks. |
 | Needs a source | Reads like a factual claim, but nothing you read supports it. The closest sources you've read are suggested as places to look. |
 
-Referee also warns when a figure in the sentence isn't in the source, shows exactly which words of a misquote differ, note when another source you read points the other way, when a claim only holds by combining two sources, and when a supporting source is more than ten years old. The library summarises how many claims your reading backs, and flags leaning heavily on one source.
+Referee also warns when a figure in the sentence isn't in the source, shows exactly which words of a misquote differ, note when another source you read points the other way, when a claim only holds by combining two sources, and when a supporting source is more than ten years old. The library summarises how many claims your reading backs.
 
 In Word, the background Word helper (macOS and Windows) checks as you type with no add-in or panel: supported claims are marked, warnings become comments (and are listed in the library), and each supported sentence gets a comment suggesting its citation. Type it in and Referee adds the source to a reference list it keeps at the end; or switch on **Add citations automatically** in Settings to have citations typed in for you. Sentences are marked with coloured underlines (green supported, amber check the wording, red contradicted), or highlights, or nothing, as chosen in settings; **Remove Marks** in Settings clears Referee's marks, leaving your own. The library, a window in Referee for Mac (and a page in the extension), lists everything you've read, manages projects, and gives the reference list for what you've cited in APA 7, Harvard, MLA 9, Chicago, IEEE, AMS or Vancouver, with page numbers for PDFs and timestamps for videos. It imports and exports BibTeX and RIS files, for Zotero, Mendeley, EndNote or LaTeX: imported entries are fetched by their link, DOI or arXiv ID and read, so Referee can check against them. The **Research trail** opens from it: a day-by-day timeline of what you read, saved, highlighted and claimed, with each claim and the source that backs it. Claims that need a source come with the closest reading you have and a Google Scholar search for their key terms: places to look, never text to use.
 
@@ -93,13 +93,23 @@ If a sentence makes no claim and nothing you read relates to it, Referee stays s
 
 **Code.** Choose your project's code folder in Settings. Referee then lists the libraries your Python, R or C/C++ code uses that ask to be cited but that your writing doesn't cite (GUDHI, Ripser, scikit-learn, NumPy, R itself, ggplot2, lme4, the tidyverse, Eigen, GSL, CGAL and others), each with its BibTeX entry; and figures in your writing that are close to, but not the same as, a value in your results (CSV, JSON or notebook outputs), which usually means the code was re-run after you wrote them.
 
+**Evidence report.** For each document, every checked claim in the order it appears, with the source, page and statement number that back it ("Def. 4.42 · p. 59"), how sure the check was, and what needs a source or contradicts one. Neighbouring claims on the same statement count once. A claim credited to a different source from the one the document mostly uses is checked again against that usual source.
+
+**Search.** ⌘K in Referee, or a shortcut of your choice from anywhere: commands, notes, sources, highlights, meetings, and the passages in your reading that match by meaning, each opening at its page. It finds what your sources say; it never writes an answer.
+
 **Notes.** Reading notes by project, each optionally linked to a saved source and a page or range of pages: "Def 4.35, basis" on pages 57–61 of your lecture notes. Clicking a note opens the source at that page, in your browser; if it's already open in a tab, the browser extension switches to that tab at the page instead of opening another. Referee also uses them: in projects where you keep notes, a claim or theorem supported by a page you haven't noted gets a short hint, in Word and Overleaf. It's information, not a warning: you don't have to note everything you cite.
+
+Notes are filtered by source, by topic (sorted by Claude, which can be switched off) and by your own folders, any number at once, and sorted newest first, by page or A to Z; the filters are kept for each project. Naming a statement in a note ("Theorem 4.50(a)", "Theorem (p. 55)") or quoting it shows the statement as the source prints it. **Add to Notes** from search quotes the passage and leaves the summary line for you to write, since writing it is part of learning it; **Check My Summary** asks questions about your note rather than rewriting it.
 
 **Referee links.** Notes and meetings have **Copy Link**, giving a `referee://` link to paste into a planner, Notion, a to-do list or anywhere else; clicking it opens Referee right there (a note opens its source at the page). `referee://source?url=…&page=…` opens any saved source at a page. Todoist tasks made from meeting action points link back to their meeting.
 
 **Meetings.** Notes from supervisor and group meetings, by project: date, attendees, notes, decisions and action points (what, who, by when, done). Action points not yet done are carried into the next meeting. A project's log exports as Markdown or LaTeX, and as the `decision-notes` and `who-did-what` files group projects ask for; link a project to its shared workspace (a GitHub repository or shared folder) and Referee keeps `notes/decision-notes.md` and `notes/who-did-what.md` up to date in it. Connect Todoist in Settings → Integrations and your own action points (where "who" is your name, "me" or everyone) become tasks in a Todoist project of the same name, with their due dates; ticking one off in either app ticks it off in both.
 
-**AI use.** A running record of each use of an AI tool: the tool and version, what you used it for, the key prompt, what it gave you and how you checked it. Your declaration is filled in from it with each project's own wording: paste the declaration your module asks for, with `{tools}`, `{system}`, `{purposes}` and `{checks}` where your answers go, or use a paragraph in the style of a paper's acknowledgement. No institution's wording is built in, and every project starts empty. The declaration is assembled from your entries with a fixed template, not written by AI, and Referee includes itself as a tool once it has checked claims, since it uses Claude.
+**AI use.** A running record of each use of an AI tool: the tool and version, what you used it for, the key prompt, what it gave you and how you checked it. Your declaration is filled in from it with each project's own wording: paste the declaration your module asks for, with `{tools}`, `{system}`, `{purposes}` and `{checks}` where your answers go, or use a paragraph in the style of a paper's acknowledgement. No institution's wording is built in, and every project starts empty. The declaration is assembled from your entries with a fixed template, not written by AI, and Referee includes itself as a tool once it has checked claims, since it uses Claude, unless one of your entries already covers it. Entries are listed newest or oldest first, and can be dragged into order within a day.
+
+**Claude connector.** Referee's connector lets a Claude chat search your reading, check a claim, and add or edit notes, meetings, tasks, sources and AI use entries. Deleting always asks first.
+
+**Privacy.** **What leaves this device**, in Settings, lists everything Referee can send off your Mac, what, where and when, with a switch where one can be turned off. Keys are kept in your Keychain. Deleted sources, notes, meetings and AI use entries stay in **Recently Deleted** for 30 days, and everything can be backed up to one file, weekly if you like.
 
 **Learning from behaviour (not yet active in Word).** The server can learn which kinds of marker a person finds useful from what they do with them, such as dismissing a marker or opening its source, and stop showing the ones they keep rejecting. The Word helper doesn't report those actions yet, so in everyday use every marker the verifier accepts is shown.
 
@@ -115,7 +125,8 @@ Browser extension, Add Source ──capture──▶ Backend (your laptop) ◀�
                                 ├─ embeddings.py passages → vectors (runs locally)
                                 ├─ store.py      saved to disk; meaning and keyword search
                                 ├─ claims.py     does an unsupported sentence need a source?
-                                ├─ verify.py     Claude: supports / contradicts / neutral,
+                                ├─ verify.py     Claude (or ChatGPT, or a local model):
+                                │                supports / contradicts / neutral,
                                 │                plus quote and copying checks
                                 ├─ statements.py Claude: a restated theorem against the cited paper
                                 ├─ code_folder.py uncited libraries, figures that don't match results
@@ -126,7 +137,7 @@ Browser extension, Add Source ──capture──▶ Backend (your laptop) ◀�
 
 **Search.** Passages are embedded with a small sentence-embedding model that runs on your own machine. A finished sentence is embedded the same way and compared by cosine similarity, and a BM25 keyword search runs alongside it, since meaning-based search can blur exact names and figures. The two rankings are combined by reciprocal rank fusion, and the top five passages are taken forward, provided they clear a minimum similarity. If none do, nothing is sent anywhere.
 
-**Verify.** Claude decides whether any of those passages supports or contradicts the specific claim, or neither. Being on the same topic is not support, and the strength of a claim counts, so "strongly linked" is contradicted by a source that finds only a weak link. The reply is constrained to a fixed schema with structured outputs. The quote it returns must be at least four words and appear in the passage (ignoring differences in spacing, capitals and curly quotes), otherwise nothing is shown. Calls time out after 10 seconds, and failures are logged. Verdicts are cached, so re-checking the same sentence against the same passages costs nothing.
+**Verify.** Claude Haiku (or ChatGPT, or a model on your Mac through Ollama, which also takes over when you're offline) decides whether any of those passages supports or contradicts the specific claim, or neither. Being on the same topic is not support, and the strength of a claim counts, so "strongly linked" is contradicted by a source that finds only a weak link. The reply is constrained to a fixed schema with structured outputs. The quote it returns must be at least four words and appear in the passage (ignoring differences in spacing, capitals and curly quotes), otherwise nothing is shown. Calls time out after 10 seconds, and failures are logged. Verdicts are cached, so re-checking the same sentence against the same passages costs nothing.
 
 **Wording checks.** Quotations are compared with the source, treating `...` and `[insertions]` as gaps. Unquoted text is checked for copied wording by the share of its 3-word runs found in the passage, ignoring runs that recur across four or more sentences of the reading, since those are stock phrasing rather than copying from one source.
 
@@ -235,6 +246,27 @@ Ignoring stock phrasing widened the margin more than five times. The chosen sett
 │   ├── meetings.py             meeting notes and action points, and their exports
 │   ├── todoist.py              your action points as Todoist tasks, both ways
 │   ├── ai_log.py               the AI use log and declarations
+│   ├── statement_lookup.py     finds a numbered statement (Theorem 4.50) in a saved source
+│   ├── page_crop.py            pictures of statements as their PDF prints them
+│   ├── ocr.py                  scanned pages and screenshots, read with Apple's Vision
+│   ├── maths_html.py           typeset maths in report pages
+│   ├── local_models.py         checks by a model on this Mac (Ollama), and the offline fallback
+│   ├── cloud_models.py         checks by OpenAI, with your own key
+│   ├── privacy.py              the switches on What leaves this device
+│   ├── referee_mcp.py          the Claude connector (MCP)
+│   ├── tasks.py                action points in Things 3, Apple Reminders, Todoist or Notion
+│   ├── notion.py               Notion tasks
+│   ├── zotero.py               papers from a Zotero collection, with their PDFs
+│   ├── obsidian.py             notes and meetings written into an Obsidian vault
+│   ├── writing_folder.py       Obsidian, R Markdown and Quarto writing, checked in a folder
+│   ├── reading_folders.py      folders of PDFs that become a project's reading
+│   ├── note_import.py          notes from Apple Notes or a Markdown folder
+│   ├── pairing.py              the pairing code for the Google Docs add-on
+│   ├── phone_sync.py           saving links and AI use from an iPhone through iCloud Drive
+│   ├── backups.py              back up and restore everything, and weekly backups
+│   ├── history.py              earlier versions of notes, meetings and AI use entries
+│   ├── undo.py                 Recently Deleted
+│   ├── trail_archive.py        archived research trails
 │   ├── feedback.py             learns which markers each person finds useful
 │   ├── claim_log.py            claims each source has backed, for the library
 │   ├── reading.py              projects, and how long unsaved reading is kept
@@ -249,7 +281,7 @@ Ignoring stock phrasing widened the margin more than five times. The chosen sett
 │   ├── .env.example            copy to .env and add your API key
 │   └── requirements.txt
 │
-├── extension/                  Chrome extension
+├── extension/                  browser extension (Chromium browsers)
 │   ├── manifest.json
 │   ├── background.js           talks to the backend, runs research mode
 │   ├── content.js              captures article pages once they've been read
@@ -257,22 +289,28 @@ Ignoring stock phrasing widened the margin more than five times. The chosen sett
 │   ├── popup/                  research mode, projects, captured reading
 │   ├── library/                captured reading, references, reports, BibTeX import and export
 │   ├── overleaf/               the Overleaf panel: reads the LaTeX, checks it, inserts citations
+│   ├── docs/                   the Google Docs and Notion panels
+│   ├── vendor/katex/           KaTeX, for typesetting maths in the panels
 │   ├── dev/editor/             developer test page for checks (not user facing)
 │   └── icons/
 │
-├── macapp/                     Referee for Mac: menu bar app, library, meetings, AI use, settings and updates
-│   ├── Sources/                the app, in Swift
+├── macapp/                     Referee for Mac: the main window, menu bar icon, settings and updates
+│   ├── Sources/                the app, in SwiftUI
+│   ├── OCR/, PageCrop/         small helpers using Apple's Vision and PDFKit
 │   ├── build.sh                builds it from this folder into /Applications
 │   ├── package.sh              builds the downloadable app, with its own Python
 │   └── make_icon.py            draws the app and extension icons
 ├── word-helper/                background Word helper (AppleScript on macOS, COM on Windows)
+├── gdocs-addon/                the Google Docs add-on (Apps Script)
+├── raycast/                    the Raycast extension
 ├── scripts/install-windows.bat starts Referee at login on Windows
 ├── assets/                     README icon and link preview image
 ├── .github/workflows/test.yml  runs the tests on Windows and macOS after every push
 │
 ├── README.md
 ├── CHANGELOG.md                what changed in each release
-├── LICENSE
+├── LICENSE                     Apache 2.0
+├── NOTICE                      credits
 └── .gitignore
 ```
 
