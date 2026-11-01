@@ -22,6 +22,8 @@
   <img alt="Windows: run from the code" src="https://img.shields.io/badge/Windows-from%20the%20code-4a4f57">
 </p>
 
+<p align="center"><img src="assets/hero.png" alt="Referee's Library and Evidence report, with example data: a draft's claims each marked backed, contradicted or needing a source, beside the reading they were checked against" width="100%"></p>
+
 Referee is for anyone who writes from sources: reports, proposals, articles, dissertations, policy papers and the rest. It checks your writing against the sources you have read: you add the articles, papers, PDFs and YouTube videos you'll cite, or a browser extension collects what you read while researching, and as you write in Word, Google Docs, Overleaf, Notion, Obsidian, R Markdown or Quarto, each finished sentence is checked against that reading. Supported claims are shown with the exact quote that backs them and the citation to add, and Referee warns you when a source says the opposite, when a quotation doesn't match its source, or when wording has been copied without quotation marks.
 
 For mathematical writing it also compares the theorems and definitions you restate with the papers you cite, checks your notation, and checks your code and results. And it keeps the records a project needs: notes from meetings, with action points sent to your to-do app, reading notes linked to the page, and a log of AI use from which a disclosure is filled in, for the universities, publishers, funders and clients that now ask for one.

@@ -274,10 +274,10 @@ struct AIUseView: View {
                             return true
                         }
                         .contextMenu {
-                            Button("Rename…") { newName = entry.purpose; renaming = entry }
+                            Button("Rename") { newName = entry.purpose; renaming = entry }
                             if model.neighbour(of: entry, up) != nil { Button("Move Up") { model.move(entry, up) } }
                             if model.neighbour(of: entry, -up) != nil { Button("Move Down") { model.move(entry, -up) } }
-                            Button("Delete…", role: .destructive) { deleting = entry.id }
+                            Button("Delete", role: .destructive) { deleting = entry.id }
                         }
             
                     }
@@ -287,11 +287,11 @@ struct AIUseView: View {
                 SwiftUI.Section("Declaration and reflection") {
                     Button(copied == "reflection" ? "Copied" : "Copy as LaTeX") { copyReflection() }
                     Button(copied == "reflection-text" ? "Copied" : "Copy as Text") { copyReflection(as: "text") }
-                    Button("Save as a Separate Page…") { saveReflection() }
+                    Button("Save as a Separate Page") { saveReflection() }
                 }
                 SwiftUI.Section("Full record") {
                     Button(copied == "markdown" ? "Copied" : "Copy as Markdown") { copy("markdown") }
-                    Button("Save as LaTeX…") { saveLatex() }
+                    Button("Save as LaTeX") { saveLatex() }
                 }
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
@@ -454,7 +454,7 @@ struct DisclosureView: View {
                 // given wording (which has its own): an own-work statement, say.
                 if format != "given" {
                     PageSection("Opening (optional)") {
-                        PlainText(placeholder: "A paragraph to put first, such as a statement that the work is your own", text: $opening)
+                        PlainText(placeholder: "A paragraph to put first", text: $opening)
                             .onChange(of: opening) { _, value in keepOpening(value) }
                     }
                     .padding(.top, 18)

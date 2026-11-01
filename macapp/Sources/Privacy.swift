@@ -143,8 +143,8 @@ struct BackupSection: View {
             HStack {
                 Text("Back up Referee")
                 Spacer()
-                Button("Back Up…") { backUp() }
-                Button("Restore…") { chooseRestore() }
+                Button("Back Up") { backUp() }
+                Button("Restore") { chooseRestore() }
             }
             .padding(.vertical, 8)
             Hairline()

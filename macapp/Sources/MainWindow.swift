@@ -77,9 +77,14 @@ struct MainWindow: View {
     @State private var choosingProject = false
     @State private var dues: [String: Date] = [:]
     private var dueDate: Date? { dues[model.project] }
+    @State private var submitted: [String: Date] = [:]
+
+    private func loadDues() async {
+        (dues, submitted) = await ProjectDue.read()
+    }
     /// The project's next deadline before it's due: its soonest open task with a date (from Meetings), if
     /// that comes before the project's own due date. Shown first under the title, with the due date below.
-    @State private var nextTask: (title: String, date: Date)?
+    @State private var nextTask: (title: String, date: Date, deadline: String?)?
 
     private func loadNextTask() async {
         let project = model.project
@@ -91,8 +96,12 @@ struct MainWindow: View {
                 guard let text = task["text"] as? String, let due = DueText.date(task["due"] as? String ?? ""), due >= today else { return nil }
                 return (text, due)
             }
-        let soonest = open.min { $0.1 < $1.1 }
-        nextTask = soonest.flatMap { task in (dues[project].map { task.1 < $0 } ?? true) ? (title: task.0, date: task.1) : nil }
+            .map { (title: $0.0, date: $0.1, deadline: String?.none) }
+        // Named deadlines not yet submitted count too, overdue ones included.
+        let deadlines = await ProjectDue.deadlines().filter { $0.project == project && !$0.submitted }
+            .map { (title: $0.name, date: $0.date, deadline: Optional($0.id)) }
+        let soonest = (open + deadlines).min { $0.date < $1.date }
+        nextTask = soonest.flatMap { task in (dues[project].map { task.date < $0 } ?? true) ? task : nil }
     }
     @State private var undoTitle: String?      // what was just deleted, offered back for a few seconds
     @State private var reload = 0
@@ -277,32 +286,64 @@ struct MainWindow: View {
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .padding(.top, 8)
-            .padding(.bottom, dueDate == nil && nextTask == nil ? 20 : 0)
+            .padding(.bottom, dueDate == nil && nextTask == nil && submitted[model.project] == nil ? 20 : 0)
             .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
             .selectionDisabled()
             .help("The current project: what you read is saved to it, and your writing is checked against it")
             // The next deadline within the project, when one comes before the project's due date.
             if let nextTask {
                 // "Next: Draft plan · in 15 days · 11 Nov", marked apart from the project's own due date below it.
-                Text("Next: \(nextTask.title) · " + ProjectDue.describe(nextTask.date).replacingOccurrences(of: "Due ", with: ""))
+                let line = Text("Next: \(nextTask.title) · " + ProjectDue.describe(nextTask.date).replacingOccurrences(of: "Due ", with: ""))
                     .font(.system(size: Scaled.s(12)))
-                    .foregroundStyle(Color.secondary)
+                    .foregroundStyle(nextTask.date < Calendar.current.startOfDay(for: Date()) ? Color.red : Color.secondary)
                     .lineLimit(2)
-                    .padding(.horizontal, 8).padding(.top, 0).padding(.bottom, dueDate == nil ? 12 : 2)
+                Group {
+                    if let id = nextTask.deadline {
+                        // A named deadline: ticked off here, like the project's own due date.
+                        Menu {
+                            Button("Mark as Submitted") {
+                                Task { await ProjectDue.deadline(["project": model.project, "id": id, "submitted": true]) }
+                            }
+                        } label: { line }
+                        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                    } else {
+                        line
+                    }
+                }
+                    .padding(.horizontal, 8).padding(.top, 0).padding(.bottom, dueDate == nil && submitted[model.project] == nil ? 12 : 2)
                     .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
                     .selectionDisabled()
-                    .help("The project's next deadline, from a task in Meetings")
+                    .help(nextTask.deadline == nil ? "The project's next deadline, from a task in Meetings" : "The project's next deadline. Click to mark it as submitted")
             }
             // Days until the project is due (set in Library → Due…).
-            if let dueDate {
+            if let when = submitted[model.project] {
+                Menu {
+                    Button("Mark as Not Submitted") { Task { await ProjectDue.submit(model.project, false) } }
+                } label: {
+                    Text("Submitted · " + when.formatted(.dateTime.day().month(.abbreviated)))
+                        .font(.system(size: Scaled.s(12)))
+                        .foregroundStyle(Color.secondary)
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                .padding(.horizontal, 8).padding(.top, 0).padding(.bottom, 12)
+                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
+                .selectionDisabled()
+                .help("Ticked off as submitted, so its due date no longer warns. Click to undo.")
+            } else if let dueDate {
                 // Words, not icons, tell the two apart: "Next: …" above, "Project due …" below.
-                Text(nextTask == nil ? ProjectDue.describe(dueDate)
-                                     : ProjectDue.describe(dueDate).replacingOccurrences(of: "Due ", with: "Project due "))
-                    .font(.system(size: Scaled.s(12)))
-                    .foregroundStyle(dueDate < Date() ? Color.red : Color.secondary)
-                    .padding(.horizontal, 8).padding(.top, 0).padding(.bottom, 12)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
-                    .selectionDisabled()
+                Menu {
+                    Button("Mark as Submitted") { Task { await ProjectDue.submit(model.project, true) } }
+                } label: {
+                    Text(nextTask == nil ? ProjectDue.describe(dueDate)
+                                         : ProjectDue.describe(dueDate).replacingOccurrences(of: "Due ", with: "Project due "))
+                        .font(.system(size: Scaled.s(12)))
+                        .foregroundStyle(dueDate < Date() ? Color.red : Color.secondary)
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                .padding(.horizontal, 8).padding(.top, 0).padding(.bottom, 12)
+                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
+                .selectionDisabled()
+                .help("Click to mark the project as submitted")
             }
             ForEach(Section.main) { item in
                 row(item)
@@ -397,11 +438,11 @@ struct MainWindow: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in evidence.load() }
         // Read again once the server answers (at launch it may still be starting, and the due date was
         // missing until the next restart), when the project changes, and on coming back to Referee.
-        .task { dues = await ProjectDue.all(); await loadNextTask() }
-        .onChange(of: model.online) { _, online in if online { Task { dues = await ProjectDue.all(); await loadNextTask(); evidence.load() } } }
-        .onChange(of: model.project) { _, _ in Task { dues = await ProjectDue.all(); await loadNextTask() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { dues = await ProjectDue.all(); await loadNextTask() } }
-        .onReceive(NotificationCenter.default.publisher(for: .refereeDueChanged)) { _ in Task { dues = await ProjectDue.all() } }
+        .task { await loadDues(); await loadNextTask() }
+        .onChange(of: model.online) { _, online in if online { Task { await loadDues(); await loadNextTask(); evidence.load() } } }
+        .onChange(of: model.project) { _, _ in Task { await loadDues(); await loadNextTask() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await loadDues(); await loadNextTask() } }
+        .onReceive(NotificationCenter.default.publisher(for: .refereeDueChanged)) { _ in Task { await loadDues(); await loadNextTask() } }
         .onChange(of: beside) { _, _ in liveSplit = 0.5; makeRoom() }
         // Pages change instantly (a fade felt jarring); only the sidebar's label animates.
         .sheet(isPresented: $about) { AboutSheet(online: model.online) }

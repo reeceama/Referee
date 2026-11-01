@@ -159,7 +159,7 @@ struct IntegrationsView: View {
                 Text(URL(fileURLWithPath: folder.wrappedValue).lastPathComponent).foregroundStyle(.secondary).help(folder.wrappedValue)
                 Button("Clear") { folder.wrappedValue = ""; save("") }
             }
-            Button(folder.wrappedValue.isEmpty ? "Choose…" : "Change…") {
+            Button(folder.wrappedValue.isEmpty ? "Choose" : "Change") {
                 let panel = NSOpenPanel()
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false

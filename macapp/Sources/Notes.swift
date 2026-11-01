@@ -427,8 +427,8 @@ struct NotesView: View {
             .help("Import notes")
             .popover(isPresented: $choosingImport, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Button("From Apple Notes…") { choosingImport = false; importingNotes = true }
-                    Button("From a Markdown Folder…") { choosingImport = false; importFolder() }
+                    Button("From Apple Notes") { choosingImport = false; importingNotes = true }
+                    Button("From a Markdown Folder") { choosingImport = false; importFolder() }
                 }
                 .buttonStyle(.plain)
                 .padding(12)
@@ -550,14 +550,14 @@ struct NoteRow: View {
                         if note.noteFolder == name { Label(name, systemImage: "checkmark") } else { Text(name) }
                     }
                 }
-                Button("New Folder…") { newFolder = ""; namingFolder = true }
+                Button("New Folder") { newFolder = ""; namingFolder = true }
                 if !note.noteFolder.isEmpty {
                     Divider()
                     Button("Remove from Folder") { note.noteFolder = "" }
                 }
             }
             Divider()
-            Button("Delete…", role: .destructive) { armed = true }
+            Button("Delete", role: .destructive) { armed = true }
         }
         .alert("New Folder", isPresented: $namingFolder) {
             TextField("Folder name", text: $newFolder)

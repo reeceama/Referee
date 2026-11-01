@@ -28,6 +28,10 @@ struct Meeting: Codable, Identifiable, Equatable {
     /// Optional, so meetings saved before this still read.
     var files: [String]? = nil
     var created: Double?
+    /// "tasks" for a project's tasks that came from no meeting: one entry per project, shown as a list
+    /// of tasks only. Optional, so meetings saved before this still read.
+    var kind: String? = nil
+    var isTasks: Bool { kind == "tasks" }
 
     var folder: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -104,7 +108,7 @@ final class MeetingsModel: ObservableObject {
               let found = try? JSONDecoder().decode([Meeting].self, from: data) else { return }
         meetings = found
         // Blank drafts left from an earlier day move to today, so a new meeting never opens on an old date.
-        for (index, meeting) in meetings.enumerated() where meeting.isBlank && meeting.date != Meeting.today {
+        for (index, meeting) in meetings.enumerated() where meeting.isBlank && !meeting.isTasks && meeting.date != Meeting.today {
             meetings[index].date = Meeting.today
             if let body = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(meetings[index])) as? [String: Any] {
                 _ = await API.post("meetings", body)  // each saved in turn: save() keeps only the latest edit
@@ -126,6 +130,16 @@ final class MeetingsModel: ObservableObject {
     func openActions(before meeting: Meeting) -> [(meeting: Meeting, action: Meeting.Action)] {
         meetings.filter { $0.id != meeting.id && $0.project == meeting.project && $0.date <= meeting.date }
             .flatMap { m in m.actions.filter { !$0.done && !$0.text.isEmpty }.map { (m, $0) } }
+    }
+
+    /// The project's tasks without a meeting, made the first time one is added.
+    func tasks(for project: String) -> Meeting {
+        if let found = meetings.first(where: { $0.isTasks && $0.project == project }) { return found }
+        var list = Meeting()
+        (list.kind, list.title, list.project, list.date) = ("tasks", "Tasks without a meeting", project, "")
+        meetings.insert(list, at: 0)
+        save(list, now: true)
+        return list
     }
 
     func add(from event: CalendarEvent? = nil) {
@@ -258,10 +272,19 @@ struct MeetingsView: View {
             // Rows drawn by Referee, full width and in line with the buttons above, at any width.
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(oldestFirst ? model.meetings.reversed() : model.meetings) { meeting in
+                    // A project's tasks without a meeting come first, whichever way the meetings are ordered.
+                    if model.filter != "all" && model.filter != "none" && !model.meetings.contains(where: { $0.isTasks }) {
+                        Text("Tasks without a meeting").font(Fonts.heading(15, .semibold)).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10).padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                            .onTapGesture { model.selected = model.tasks(for: model.filter).id }
+                    }
+                    ForEach(model.meetings.filter(\.isTasks) + (oldestFirst ? model.meetings.reversed() : model.meetings).filter { !$0.isTasks }) { meeting in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(meeting.title.isEmpty ? "Untitled meeting" : meeting.title).font(Fonts.heading(15, .semibold)).lineLimit(2)
-                            Text(meeting.day + (model.filter == "all" && !meeting.project.isEmpty ? " · \(meeting.project)" : ""))
+                            Text(meeting.isTasks ? "Tasks without a meeting" : meeting.title.isEmpty ? "Untitled meeting" : meeting.title).font(Fonts.heading(15, .semibold)).lineLimit(2)
+                            Text((meeting.isTasks ? "\(meeting.actions.filter { !$0.done && !$0.text.isEmpty }.count) to do" : meeting.day)
+                                 + (model.filter == "all" && !meeting.project.isEmpty ? " · \(meeting.project)" : ""))
                                 .font(Scaled.style(10, .regular))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -273,8 +296,8 @@ struct MeetingsView: View {
                         .contentShape(Rectangle())
                         .onTapGesture { model.selected = meeting.id }
                         .contextMenu {
-                            Button("Rename…") { newName = meeting.title; renaming = meeting }
-                            Button("Delete…", role: .destructive) { deleting = meeting.id }
+                            if !meeting.isTasks { Button("Rename") { newName = meeting.title; renaming = meeting } }
+                            Button("Delete", role: .destructive) { deleting = meeting.id }
                         }
             
                     }
@@ -293,7 +316,7 @@ struct MeetingsView: View {
                         if !model.workspace.isEmpty {
                             Button("Unlink") { model.setWorkspace("") }.buttonStyle(.borderless).font(Scaled.style(10, .regular))
                         }
-                        Button(model.workspace.isEmpty ? "Link…" : "Change…") { chooseWorkspace() }.buttonStyle(.borderless).font(Scaled.style(10, .regular))
+                        Button(model.workspace.isEmpty ? "Link" : "Change") { chooseWorkspace() }.buttonStyle(.borderless).font(Scaled.style(10, .regular))
                     }
                     // The group's Markdown files, whatever they're called: opened, never written by themselves.
                     ForEach(sharedFiles, id: \.self) { path in
@@ -312,10 +335,10 @@ struct MeetingsView: View {
             HStack(spacing: 8) {
                 Menu {
                     Button(copied ? "Copied" : "Copy as Markdown") { copyMarkdown() }
-                    Button("Save as LaTeX…") { saveLatex() }
+                    Button("Save as LaTeX") { saveLatex() }
                     if model.filter != "all" && model.filter != "none" && model.workspace.isEmpty {
                         Divider()
-                        Button("Link Shared Folder…") { chooseWorkspace() }
+                        Button("Link Shared Folder") { chooseWorkspace() }
                             .help("For group projects: your group's shared folder or repository, to read its files here")
                     }
                 } label: {
@@ -406,6 +429,11 @@ struct MeetingEditor: View {
 
     var body: some View {
         Page {
+            if meeting.isTasks {
+                Text("Tasks without a meeting").font(Fonts.heading(28, .regular))
+                Text(meeting.project).font(Scaled.style(12, .regular)).foregroundStyle(.secondary).padding(.top, 4)
+                Hairline().padding(.vertical, 22)
+            } else {
             HStack(alignment: .firstTextBaseline) {
                 PageTitle(placeholder: "Untitled meeting", text: $meeting.title)
                 HistoryButton(id: meeting.id, name: meeting.title)
@@ -419,8 +447,9 @@ struct MeetingEditor: View {
             }
             .padding(.top, 10)
             Hairline().padding(.vertical, 22)
+            }
             VStack(alignment: .leading, spacing: 26) {
-                let open = model.openActions(before: meeting)
+                let open = meeting.isTasks ? [] : model.openActions(before: meeting)
                 if !open.isEmpty {
                     PageSection("Still to do from earlier meetings") {
                         ForEach(open, id: \.action.id) { item in
@@ -431,8 +460,10 @@ struct MeetingEditor: View {
                         }
                     }
                 }
+                if !meeting.isTasks {
                 PageSection("Notes") { MarkdownField(placeholder: "What was discussed: paragraphs, - lists, # headings, $maths$", text: $meeting.notes) }
                 PageSection("Decisions") { MarkdownField(placeholder: "What was decided, and why", text: $meeting.decisions) }
+                }
                 PageSection("Tasks") {
                     // Each one: its title (wrapping), when it's due underneath, then notes.
                     ForEach($meeting.actions) { $action in
@@ -497,6 +528,7 @@ struct MeetingEditor: View {
                 }
             }
             // Attachments: to look at, not sources.
+            if !meeting.isTasks {
             VStack(alignment: .leading, spacing: 8) {
                 if let files = meeting.files, !files.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -516,6 +548,7 @@ struct MeetingEditor: View {
                     .help("Add photos or files to this meeting: a whiteboard, slides, a marked-up page")
             }
             .padding(.top, 24)
+            }
             HStack {
                 Button(copied ? "Copied" : "Copy link") {
                     RefereeLinks.copy(RefereeLinks.meeting(meeting.id))

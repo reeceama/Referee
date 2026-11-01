@@ -385,7 +385,7 @@ struct MenuContent: View {
         Text(statusLine)
         Text("\(model.saved) Saved · \(model.temporary) Temporary")
         if model.online && !model.hasKey {
-            Button("Add API Key…") { show("integrations") }
+            Button("Add API Key") { show("integrations") }
         }
         Divider()
         Toggle("Research Mode", isOn: Binding(get: { model.focus }, set: { model.setResearch($0) }))
@@ -397,7 +397,7 @@ struct MenuContent: View {
             .pickerStyle(.inline)
             .labelsHidden()
             Divider()
-            Button("New Project…") { show("new-project") }
+            Button("New Project") { show("new-project") }
         }
         Menu("Keep Unsaved Reading For") {
             Picker("Keep", selection: Binding(get: { model.keepMinutes }, set: { model.setKeep($0) })) {
@@ -407,17 +407,17 @@ struct MenuContent: View {
             .labelsHidden()
         }
         Divider()
-        Button { show("add-source") } label: { Label("Add Source…", systemImage: "plus") }
+        Button { show("add-source") } label: { Label("Add Source", systemImage: "plus") }
         Divider()
         // The main window's sections, named and drawn as in its sidebar.
         ForEach(Section.main) { item in
             Button { show(item.rawValue) } label: { Label(item.title, systemImage: item.symbol) }
         }
         Divider()
-        Button { show("settings") } label: { Label("Settings…", systemImage: Section.settings.symbol) }
+        Button { show("settings") } label: { Label("Settings", systemImage: Section.settings.symbol) }
             .keyboardShortcut(",")
         if Updater.shared.current != nil {
-            Button("Check for Updates…") { Updater.shared.check(manually: true) }
+            Button("Check for Updates") { Updater.shared.check(manually: true) }
         }
         Divider()
         Button("Quit Referee") { NSApp.terminate(nil) }
@@ -475,7 +475,7 @@ struct AddSourceView: View {
                     .prominentGlassButton()
             }
             HStack {
-                Button("Choose a PDF or Image…", action: choosePDF)
+                Button("Choose a PDF or Image", action: choosePDF)
                     .disabled(working)
                     .glassButton()
                 Spacer()
@@ -680,9 +680,9 @@ struct SettingsView: View {
                         }
                     }
                 }
-                row("Setup") { Button("Run Setup Again…") { Windows.open("setup") } }
+                row("Setup") { Button("Run Setup Again") { Windows.open("setup") } }
                 row("Integrations", last: true) {
-                    Button("Manage…") { Windows.open("integrations") }
+                    Button("Manage") { Windows.open("integrations") }
                 }
             }
             group("Checks", footer: checksFooter) {
@@ -784,7 +784,7 @@ struct SettingsView: View {
                 row("Quick capture shortcut") { ShortcutRecorder(shortcut: .capture) }
                 ReadingFoldersRow(project: model.project)
                 row("Browser extension", last: true) {
-                    Button("Install…") { BrowserExtension.install(repo: repository) }
+                    Button("Install") { BrowserExtension.install(repo: repository) }
                 }
             }
             group("Writing", footer: writingFooter) {
@@ -816,7 +816,7 @@ struct SettingsView: View {
                 }
                 if writingIn == "gdocs" {
                     row("Add-on") {
-                        Button("Set Up…") { NSWorkspace.shared.open(addOnFolder) }
+                        Button("Set Up") { NSWorkspace.shared.open(addOnFolder) }
                     }
                     row("Pairing code", last: true) {
                         HStack(spacing: 8) {
@@ -885,7 +885,7 @@ struct SettingsView: View {
             }
             BackupSection()
             group("Help", footer: "Opens a GitHub issue with Referee's version and your macOS version filled in. You write the rest, and nothing is sent until you post it.") {
-                row("Report a problem", last: true) { Button("Report…") { ReportProblem.open() } }
+                row("Report a problem", last: true) { Button("Report") { ReportProblem.open() } }
             }
 
         }
@@ -955,7 +955,7 @@ struct SettingsView: View {
                     .help(folder.wrappedValue)
                 Button("Clear") { folder.wrappedValue = ""; save("") }
             }
-            Button(folder.wrappedValue.isEmpty ? "Choose…" : "Change…") {
+            Button(folder.wrappedValue.isEmpty ? "Choose" : "Change") {
                 if let chosen = chooseFolder() { folder.wrappedValue = chosen; save(chosen) }
             }
         }
@@ -1389,7 +1389,7 @@ struct ReadingFoldersRow: View {
             HStack {
                 Text("Reading folders")
                 Spacer()
-                Button("Add Folder…") { add() }
+                Button("Add Folder") { add() }
             }
             ForEach(Array(folders.enumerated()), id: \.offset) { _, f in
                 let path = f["path"] as? String ?? ""

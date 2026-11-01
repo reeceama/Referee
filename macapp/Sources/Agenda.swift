@@ -15,6 +15,8 @@ struct AgendaItem: Identifiable {
     let detail: String       // where it's from
     let colour: Color
     let open: () -> Void
+    /// Choices on right-click: done or submitted, and delete.
+    var menu: [(String, () -> Void)] = []
 }
 
 @MainActor
@@ -26,11 +28,29 @@ final class AgendaModel: ObservableObject {
 
     /// How many days back are loaded: four weeks to start, four more each time you reach the top.
     @Published var back = 28
+    /// How many days ahead are loaded: four weeks, or further to reach a date jumped to.
+    @Published var ahead = 28
+    /// A day to scroll to (from Today or Go to date), once its days are loaded; bumped each time.
+    var target = Date()
+    var pending: Date?
+    @Published var jumps = 0
     /// Every project's, or only the current one's.
     @Published var everyProject = false { didSet { load() } }
 
     /// Bumped when the days first load, so the page opens on today (but not when earlier weeks arrive).
     @Published var opened = 0
+
+    /// A task ticked off or deleted from the calendar, in the meeting (or list) it belongs to.
+    func change(_ actionID: String, in meetingID: String, delete: Bool) async {
+        guard let data = await API.request("meetings?project=all"),
+              var meeting = (try? JSONDecoder().decode([Meeting].self, from: data))?.first(where: { $0.id == meetingID }) else { return }
+        if delete { meeting.actions.removeAll { $0.id == actionID } }
+        else if let i = meeting.actions.firstIndex(where: { $0.id == actionID }) { meeting.actions[i].done = true }
+        if let body = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(meeting)) as? [String: Any] {
+            _ = await API.post("meetings", body)
+        }
+        load(keepPlace: true)
+    }
 
     func load(keepPlace: Bool = false) {
         Task {
@@ -39,7 +59,7 @@ final class AgendaModel: ObservableObject {
             let calendar = Calendar.current
             let today = calendar.startOfDay(for: Date())
             let start = calendar.date(byAdding: .day, value: -back, to: today)!
-            let end = calendar.date(byAdding: .day, value: 28, to: today)!
+            let end = calendar.date(byAdding: .day, value: ahead, to: today)!
             var items: [(Date, AgendaItem)] = []
             let day = DateFormatter()
             day.dateFormat = "yyyy-MM-dd"
@@ -51,11 +71,15 @@ final class AgendaModel: ObservableObject {
                 for a in m["actions"] as? [[String: Any]] ?? [] where a["done"] as? Bool != true {
                     guard let text = a["text"] as? String, !text.isEmpty,
                           let due = (a["due"] as? String).flatMap(DueText.date), due < end, let mid = m["id"] as? String else { continue }
+                    let aid = a["id"] as? String ?? ""
                     items.append((due, AgendaItem(id: "a-\(a["id"] as? String ?? text)", kind: .task, title: text, time: nil,
                                                               detail: due < today ? "Task · overdue" : "Task",
                                                               colour: .orange,
-                                                              open: { RefereeLinks.handle(URL(string: "referee://meeting/\(mid)")!) })))
+                                                              open: { RefereeLinks.handle(URL(string: "referee://meeting/\(mid)")!) },
+                                                              menu: [("Mark as Done", { Task { await self.change(aid, in: mid, delete: false) } }),
+                                                                     ("Delete Task", { Task { await self.change(aid, in: mid, delete: true) } })])))
                 }
+                guard m["kind"] as? String != "tasks" else { continue }   // tasks without a meeting: only their tasks show
                 guard let id = m["id"] as? String, let date = (m["date"] as? String).flatMap(day.date(from:)),
                       date >= start, date < end else { continue }
                 items.append((date, AgendaItem(id: "m-\(id)", kind: .meeting, title: (m["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Meeting",
@@ -81,13 +105,29 @@ final class AgendaModel: ObservableObject {
             } else {
                 note = "Allow Referee to see your calendars in System Settings → Privacy & Security → Calendars to show events here."
             }
-            defer { if !keepPlace { opened += 1 } }
-            // Projects' due dates.
-            for (name, due) in await ProjectDue.all() where inScope(name) && due >= start && due < end {
-                items.append((due, AgendaItem(id: "due-\(name)", kind: .task, title: "\(name) due", time: nil,
-                                              detail: "Project deadline", colour: .red, open: {})))
+            defer {
+                if let day = pending { target = day; pending = nil; jumps += 1 } else if !keepPlace { opened += 1 }
             }
-            days = (-back..<28).map { offset in
+            // Projects' due dates; a submitted one stays, ticked off in green.
+            let dues = await ProjectDue.everything()
+            for (name, due) in dues.dates where inScope(name) && due >= start && due < end {
+                let done = dues.submitted[name] != nil
+                items.append((due, AgendaItem(id: "due-\(name)", kind: .task, title: "\(name) due", time: nil,
+                                              detail: done ? "Submitted" : "Project deadline", colour: done ? .green : .red, open: {})))
+            }
+            // Named deadlines besides a project's due date.
+            for deadline in await ProjectDue.deadlines() where inScope(deadline.project) && deadline.date >= start && deadline.date < end {
+                let done = deadline.submitted
+                let (project, id) = (deadline.project, deadline.id)
+                items.append((deadline.date, AgendaItem(id: "dl-\(id)", kind: .task, title: deadline.name, time: nil,
+                                                        detail: done ? "Submitted" : "Deadline · \(project)", colour: done ? .green : .red,
+                                                        open: {},
+                                                        menu: [(done ? "Mark as Not Submitted" : "Mark as Submitted", {
+                                                                   Task { await ProjectDue.deadline(["project": project, "id": id, "submitted": !done]); self.load(keepPlace: true) } }),
+                                                               ("Delete Deadline", {
+                                                                   Task { await ProjectDue.deadline(["project": project, "id": id, "delete": true]); self.load(keepPlace: true) } })])))
+            }
+            days = (-back..<ahead).map { offset in
                 let date = calendar.date(byAdding: .day, value: offset, to: today)!
                 let mine = items.filter { calendar.isDate($0.0, inSameDayAs: date) }.map(\.1)
                     .sorted { ($0.time ?? .distantPast) < ($1.time ?? .distantPast) }
@@ -106,12 +146,24 @@ struct AgendaView: View {
     var body: some View {
         VStack(spacing: 0) {
         // Stays put while the days scroll beneath it.
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
             Picker("", selection: $model.everyProject) {
                 Text("This project").tag(false)
                 Text("All projects").tag(true)
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
+            Spacer(minLength: 12)
+            HStack(spacing: 8) {
+                Button("Today") { go(to: Date()) }
+                Button { picking = true } label: { Image(systemName: "calendar") }
+                    .help("Go to a date")
+                    .popover(isPresented: $picking) {
+                        DatePicker("", selection: $chosen, displayedComponents: .date)
+                            .datePickerStyle(.graphical).labelsHidden().padding(10)
+                            .onChange(of: chosen) { _, day in picking = false; go(to: day) }
+                    }
+            }
+            .buttonStyle(.borderless)
         }
         .frame(maxWidth: 620, alignment: .leading)
         .padding(.horizontal, 36).padding(.top, 16).padding(.bottom, 10)
@@ -130,18 +182,21 @@ struct AgendaView: View {
                         VStack(alignment: .leading, spacing: 0) {
                             Text(day.date.formatted(.dateTime.weekday(.wide)).uppercased())
                                 .font(.system(size: Scaled.s(13), weight: .semibold)).kerning(0.4)
-                            Text(day.date.formatted(.dateTime.month(.wide)).uppercased())
+                            Text(day.date.formatted(.dateTime.month(.wide).year()).uppercased())
                                 .font(.system(size: Scaled.s(13), weight: .semibold)).kerning(0.4).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button { newMeeting(on: day.date) } label: { Image(systemName: "plus").font(.system(size: Scaled.s(16), weight: .medium)) }
-                            .buttonStyle(.borderless)
-                            .help("New meeting on this day")
-                            .accessibilityLabel("New meeting on \(day.date.formatted(date: .complete, time: .omitted))")
+                        Menu {
+                            Button("Meeting") { newMeeting(on: day.date) }
+                            Button("Deadline") { adding = (day.date, true) }
+                            Button("Task") { adding = (day.date, false) }
+                        } label: { Image(systemName: "plus").font(.system(size: Scaled.s(16), weight: .medium)) }
+                            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                            .help("Add a meeting, deadline or task on this day")
+                            .accessibilityLabel("Add on \(day.date.formatted(date: .complete, time: .omitted))")
                     }
                     ForEach(day.items) { item in
-                        Button(action: item.open) {
-                            HStack(spacing: 10) {
+                        let row = HStack(spacing: 10) {
                                 Image(systemName: item.kind == .task ? "checkmark.circle" : "circle.fill")
                                     .font(.system(size: Scaled.s(item.kind == .task ? 12 : 8))).foregroundStyle(item.colour)
                                     .frame(width: 14)
@@ -155,8 +210,13 @@ struct AgendaView: View {
                                 Text(item.detail).font(Scaled.style(10, .regular)).foregroundStyle(.secondary).lineLimit(1)
                             }
                             .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
+                        // Left-click opens it; right-click to tick it off or delete it.
+                        Button(action: item.open) { row }.buttonStyle(.plain)
+                            .contextMenu {
+                                ForEach(item.menu.indices, id: \.self) { i in
+                                    Button(item.menu[i].0, role: item.menu[i].0.hasPrefix("Delete") ? .destructive : nil, action: item.menu[i].1)
+                                }
+                            }
                         .padding(.leading, 68)
                     }
                     Hairline().padding(.leading, 68).padding(.top, 8)
@@ -171,6 +231,13 @@ struct AgendaView: View {
             // Opens on today; scroll up for the past weeks.
             // Open on today; only then does reaching the top load earlier weeks (the list starts at its
             // oldest day, which would otherwise count as reaching the top before it ever got to today).
+            .onChange(of: model.jumps) { _, _ in
+                settled = false
+                DispatchQueue.main.async {
+                    scroll.scrollTo(Calendar.current.startOfDay(for: model.target), anchor: .top)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { settled = true }
+                }
+            }
             .onChange(of: model.opened) { _, _ in
                 settled = false
                 DispatchQueue.main.async {
@@ -182,6 +249,31 @@ struct AgendaView: View {
         }
         }
         .onAppear { model.load(); meetings.load() }
+        .sheet(isPresented: Binding(get: { adding != nil }, set: { if !$0 { adding = nil } })) {
+            if let adding {
+                AddToDay(date: adding.date, deadline: adding.deadline) { model.load(keepPlace: true) }
+            }
+        }
+    }
+
+    @State private var adding: (date: Date, deadline: Bool)?
+    @State private var picking = false
+    @State private var chosen = Date()
+
+    /// Scrolls to a day, loading the weeks around it first if they aren't loaded yet.
+    private func go(to date: Date) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let offset = calendar.dateComponents([.day], from: today, to: calendar.startOfDay(for: date)).day ?? 0
+        if offset < -model.back || offset >= model.ahead {
+            model.back = max(model.back, -offset + 7)
+            model.ahead = max(model.ahead, offset + 28)
+            model.pending = date      // scrolls once the new days arrive
+            model.load(keepPlace: true)
+        } else {
+            model.target = date
+            model.jumps += 1
+        }
     }
 
     private func newMeeting(on date: Date) {
@@ -199,14 +291,53 @@ struct AgendaView: View {
 
 /// Projects' due dates, as Referee's server keeps them (typed in, or followed from a Todoist task).
 enum ProjectDue {
+    /// Due dates of projects not yet submitted: a submitted one stops warning.
     static func all() async -> [String: Date] {
+        await read().due
+    }
+
+    /// Due dates still to come, and when projects were ticked off as submitted.
+    static func read() async -> (due: [String: Date], submitted: [String: Date]) {
+        let found = await everything()
+        return (found.dates.filter { found.submitted[$0.key] == nil }, found.submitted)
+    }
+
+    /// Every project's due date, submitted or not, and when the submitted ones were ticked off.
+    static func everything() async -> (dates: [String: Date], submitted: [String: Date]) {
         let format = DateFormatter()
         format.dateFormat = "yyyy-MM-dd"
-        var found: [String: Date] = [:]
+        var dates: [String: Date] = [:], submitted: [String: Date] = [:]
         for (name, value) in await API.get("projects/due") ?? [:] {
-            if let date = ((value as? [String: Any])?["date"] as? String).flatMap(format.date(from:)) { found[name] = date }
+            let entry = value as? [String: Any] ?? [:]
+            if let date = (entry["date"] as? String).flatMap(format.date(from:)) { dates[name] = date }
+            if let when = (entry["submitted"] as? String).flatMap(format.date(from:)) { submitted[name] = when }
+        }
+        return (dates, submitted)
+    }
+
+    /// Named deadlines besides projects' due dates ("Draft to supervisor").
+    static func deadlines() async -> [(project: String, id: String, name: String, date: Date, submitted: Bool)] {
+        let format = DateFormatter()
+        format.dateFormat = "yyyy-MM-dd"
+        var found: [(project: String, id: String, name: String, date: Date, submitted: Bool)] = []
+        for (project, value) in await API.get("projects/due") ?? [:] {
+            for d in (value as? [String: Any])?["deadlines"] as? [[String: Any]] ?? [] {
+                guard let id = d["id"] as? String, let date = (d["date"] as? String).flatMap(format.date(from:)) else { continue }
+                found.append((project, id, d["name"] as? String ?? "Deadline", date, d["submitted"] as? String != nil))
+            }
         }
         return found
+    }
+
+    static func deadline(_ body: [String: Any]) async {
+        _ = await API.post("projects/deadline", body)
+        NotificationCenter.default.post(name: .refereeDueChanged, object: nil)
+    }
+
+    /// Ticks a project off as submitted, or back to not submitted.
+    static func submit(_ project: String, _ submitted: Bool) async {
+        _ = await API.post("projects/submitted", ["project": project, "submitted": submitted])
+        NotificationCenter.default.post(name: .refereeDueChanged, object: nil)
     }
 
     /// "Due in 32 days · 23 Nov", "Due tomorrow", "Due today", "3 days overdue".
@@ -265,6 +396,11 @@ struct DueDatePicker: View {
                 Spacer()
                 Button("Clear") { save([:]) }
             }
+            Divider()
+            Button("Mark as Submitted") {
+                Task { await ProjectDue.submit(project, true); done(); dismiss() }
+            }
+            .help("Stops the due date warning. Click “Submitted” in the sidebar to undo.")
         }
         .padding(16)
         .frame(width: 380)
@@ -301,5 +437,66 @@ enum DueText {
         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
         let found = detector?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))?.date
         return found.map { Calendar.current.startOfDay(for: $0) }
+    }
+}
+
+
+/// ＋ on a day: a named deadline, or a task that comes from no meeting (kept in the project's
+/// "Tasks without a meeting", and sent to your to-do app like action points).
+struct AddToDay: View {
+    let date: Date
+    let deadline: Bool
+    let done: () -> Void
+    @State private var projects: [String] = []
+    @State private var project = ""
+    @State private var name = ""
+    @State private var day = Date()
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(deadline ? "New deadline" : "New task").font(Scaled.style(13, .semibold))
+            TextField(deadline ? "Name" : "Task", text: $name).textFieldStyle(.roundedBorder)
+            Picker("Project", selection: $project) { ForEach(projects, id: \.self) { Text($0).tag($0) } }
+            DatePicker(deadline ? "Due" : "By", selection: $day, displayedComponents: .date)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Add") { Task { await add(); done(); dismiss() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || project.isEmpty)
+            }
+        }
+        .padding(18).frame(width: 340)
+        .task {
+            day = date
+            let settings = await API.get("settings")
+            projects = settings?["projects"] as? [String] ?? []
+            project = settings?["project"] as? String ?? projects.first ?? ""
+        }
+    }
+
+    private func add() async {
+        let format = DateFormatter()
+        format.dateFormat = "yyyy-MM-dd"
+        let text = name.trimmingCharacters(in: .whitespaces)
+        if deadline {
+            await ProjectDue.deadline(["project": project, "name": text, "date": format.string(from: day)])
+            return
+        }
+        // Added to the project's tasks without a meeting, made if it isn't there yet.
+        let query = "meetings?project=\(project.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")"
+        let found = (try? JSONDecoder().decode([Meeting].self, from: await API.request(query) ?? Data())) ?? []
+        var list = found.first(where: \.isTasks) ?? {
+            var list = Meeting()
+            (list.kind, list.title, list.project) = ("tasks", "Tasks without a meeting", project)
+            return list
+        }()
+        var action = Meeting.Action()
+        (action.text, action.due) = (text, format.string(from: day))
+        list.actions.append(action)
+        if let body = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(list)) as? [String: Any] {
+            _ = await API.post("meetings", body)
+        }
     }
 }

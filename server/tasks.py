@@ -319,7 +319,8 @@ class Sync:
                     if action.get("done") or not todoist.is_mine(action.get("who", ""), name):
                         continue
                     # The action point's own notes first, then where it came from.
-                    origin = f"From {meeting.get('title') or 'a meeting'} ({meeting.get('date')}): referee://meeting/{meeting['id']}"
+                    origin = (f"Added in Referee: referee://meeting/{meeting['id']}" if meeting.get("kind") == "tasks" else
+                              f"From {meeting.get('title') or 'a meeting'} ({meeting.get('date')}): referee://meeting/{meeting['id']}")
                     notes = f"{action['notes'].strip()}\n\n{origin}" if (action.get("notes") or "").strip() else origin
                     action["task_id"] = backend.create(action["text"], notes, due_date(due_text), project)
                     action["task_app"], action["task_sent"] = app, [action["text"], due_text]

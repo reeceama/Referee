@@ -147,7 +147,7 @@ struct EvidenceReportView: View {
                         .foregroundStyle(.secondary)
                         .help("Refresh")
                     Menu {
-                        Button("Remove This Document…", role: .destructive) { removing = true }
+                        Button("Remove This Document", role: .destructive) { removing = true }
                     } label: { Image(systemName: "ellipsis") }
                         .accessibilityLabel("More")
                         .menuIndicator(.hidden)

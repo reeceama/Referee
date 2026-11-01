@@ -46,11 +46,11 @@ struct ReportView: View {
                     .labelsHidden().fixedSize()
                 Stepper("\(Int(size)) pt", value: $size, in: 9...20).fixedSize()
                 Menu("Export") {
-                    Button("PDF…") { savePDF() }
-                    Button("Word…") { saveWord() }
-                    Button("HTML…") { saveHTML() }
+                    Button("PDF") { savePDF() }
+                    Button("Word") { saveWord() }
+                    Button("HTML") { saveHTML() }
                     Divider()
-                    Button("Print…") { web.printOperation(with: .shared).runModal(for: NSApp.keyWindow ?? NSWindow(), delegate: nil, didRun: nil, contextInfo: nil) }
+                    Button("Print") { web.printOperation(with: .shared).runModal(for: NSApp.keyWindow ?? NSWindow(), delegate: nil, didRun: nil, contextInfo: nil) }
                 }
                 .fixedSize()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
@@ -92,7 +92,7 @@ struct ReportView: View {
             }
             .fixedSize()
         }
-        Button("Archive This Trail…") { confirming = true }
+        Button("Archive This Trail") { confirming = true }
             .disabled((summary["sources"] as? Int ?? 0) + (summary["checks"] as? Int ?? 0) == 0)
             .task { await loadSummary(project) }
             .alert("Archive the research trail for \(project.isEmpty ? "No project" : project)?", isPresented: $confirming) {

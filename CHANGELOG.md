@@ -2,6 +2,15 @@
 
 What changed in each release of Referee, newest first. Releases are numbered (`v1.0.0`), and downloaded copies of Referee for Mac update themselves to the latest one.
 
+## 1.0.2 (1 November 2026, `v1.0.2`)
+
+- **Mark as Submitted**: click a project's due date under its name to tick it off. Its warning stops, and the calendar keeps the date with a green tick.
+- **Deadlines**: named deadlines besides a project's due date ("Draft to supervisor"), added from the calendar. The soonest one not yet submitted shows under the project's name.
+- **Tasks without a meeting**: each project has a list of tasks that came from no meeting, at the top of Meetings. They go to your to-do app like action points.
+- **Calendar**: ＋ on a day adds a meeting, a deadline or a task. Each day shows its year, and **Today** and a date picker jump to any date. Right-click a task to mark it done or delete it, or a deadline to mark it submitted or delete it.
+- Menu items and buttons no longer end in "…", and text boxes no longer show examples.
+- The README opens with a picture of Referee.
+
 ## 1.0.1 (1 November 2026, `v1.0.1`)
 
 - Disclosures list tools, purposes and checks with commas rather than semicolons, in every format.

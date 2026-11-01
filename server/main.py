@@ -848,7 +848,7 @@ _due_cache: dict = {}
 
 @app.get("/projects/due")
 def project_dues():
-    # {project: {"date", "task", "title"}}, with Todoist-linked dates refreshed at most every 10 minutes.
+    # {project: {"date", "task", "title", "submitted"}}, with Todoist-linked dates refreshed at most every 10 minutes.
     dues = _project_dues()
     for name, due in dues.items():
         task = due.get("task")
@@ -869,7 +869,38 @@ def set_project_due(body: dict):
     if not body.get("date") and not body.get("task"):
         dues.pop(name, None)
     else:
-        dues[name] = {"date": body.get("date"), "task": body.get("task"), "title": body.get("title")}
+        dues[name] = {"date": body.get("date"), "task": body.get("task"), "title": body.get("title"),
+                      "submitted": (dues.get(name) or {}).get("submitted"),
+                      "deadlines": (dues.get(name) or {}).get("deadlines") or []}
+    project_due_path.write_text(json.dumps(dues, indent=1), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/projects/submitted")
+def set_project_submitted(body: dict):
+    # {"project", "submitted"}: ticked off as submitted (today), so its due date stops warning; or not.
+    dues = _project_dues()
+    name = body.get("project") or ""
+    due = dues.setdefault(name, {})
+    due["submitted"] = date.today().isoformat() if body.get("submitted") else None
+    project_due_path.write_text(json.dumps(dues, indent=1), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/projects/deadline")
+def set_project_deadline(body: dict):
+    # A named deadline besides the project's due date ("Draft to supervisor"): {"project", "id"?, "name",
+    # "date", "submitted"?} adds or changes one; {"project", "id", "delete": true} removes it.
+    dues = _project_dues()
+    due = dues.setdefault(body.get("project") or "", {})
+    deadlines = [d for d in due.get("deadlines") or [] if d.get("id") != body.get("id")]
+    if not body.get("delete"):
+        old = next((d for d in due.get("deadlines") or [] if d.get("id") == body.get("id")), {})
+        submitted = body.get("submitted", bool(old.get("submitted")))
+        deadlines.append({"id": body.get("id") or uuid.uuid4().hex, "name": (body.get("name") or old.get("name") or "").strip(),
+                          "date": body.get("date") or old.get("date"),
+                          "submitted": (old.get("submitted") or date.today().isoformat()) if submitted else None})
+    due["deadlines"] = sorted(deadlines, key=lambda d: d.get("date") or "")
     project_due_path.write_text(json.dumps(dues, indent=1), encoding="utf-8")
     return {"ok": True}
 
