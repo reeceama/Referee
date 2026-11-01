@@ -64,6 +64,10 @@ final class NotesModel: ObservableObject {
     @Published var projects: [String] = []
     @Published var filter = "all"
     @Published var loaded = false   // so "No notes yet" doesn't flash while they load
+    @Published var summarising: Note?   // a note just added from search, waiting for your summary
+    @Published var refreshed: [String: Int] = [:]   // bumped when a note changes outside its row, to redraw it
+    /// Set by search's Add to Notes; picked up when Notes next loads.
+    static var awaitingSummary: String?
     private var current = ""
     private var pending: [String: Task<Void, Never>] = [:]
 
@@ -91,6 +95,10 @@ final class NotesModel: ObservableObject {
               let found = try? JSONDecoder().decode([Note].self, from: data) else { return }
         notes = found
         loaded = true
+        if let id = NotesModel.awaitingSummary, let note = notes.first(where: { $0.id == id }) {
+            NotesModel.awaitingSummary = nil
+            summarising = note
+        }
     }
 
     /// The sources a note in this project can link to: the project's own first, then the rest.
@@ -108,6 +116,16 @@ final class NotesModel: ObservableObject {
         note.project = importProject
         notes.append(note)
         save(note, now: true)
+    }
+
+    /// Your summary, as the note's first line above the quoted passage.
+    func addSummary(_ text: String, to note: Note) {
+        var note = note
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty else { return }
+        note.body = (line.hasPrefix("-") ? line : "- " + line) + "\n\n" + note.body
+        save(note, now: true)
+        refreshed[note.id, default: 0] += 1
     }
 
     func save(_ note: Note, now: Bool = false) {
@@ -221,6 +239,7 @@ final class NotesModel: ObservableObject {
 extension Notification.Name {
     static let refereeDeleted = Notification.Name("refereeDeleted")
     static let refereeShowMeeting = Notification.Name("refereeShowMeeting")
+    static let refereeNoteAdded = Notification.Name("refereeNoteAdded")
 }
 
 struct NotesView: View {
@@ -368,7 +387,7 @@ struct NotesView: View {
             }
             ForEach(shown) { note in
                 Hairline()
-                NoteRow(model: model, note: note).id(note.id)
+                NoteRow(model: model, note: note).id("\(note.id)-\(model.refreshed[note.id] ?? 0)")
             }
         }
         }
@@ -385,6 +404,10 @@ struct NotesView: View {
             RecentlyDeletedButton(kind: "note", project: model.filter, inHeader: true) { Task { await model.reload() } }
             addButton
         } }
+        .sheet(item: $model.summarising) { note in
+            SummarySheet(note: note) { text in model.addSummary(text, to: note) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refereeNoteAdded)) { _ in Task { await model.reload() } }
         .sheet(isPresented: $importingNotes) {
             AppleNotesImportSheet(project: model.importProject) { summary in
                 imported = summary
@@ -712,3 +735,42 @@ struct FileThumbnail: View {
     }
 }
 
+
+
+/// After Add to Notes from search: the passage, as its page prints it, and a box for your own
+/// summary. Writing it yourself is part of learning it, so nothing is filled in for you.
+struct SummarySheet: View {
+    let note: Note
+    let save: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(note.title.isEmpty ? "New note" : note.title).font(Fonts.heading(22, .regular))
+            ScrollView {
+                MarkdownView(text: note.body, sources: note.attachments.map(\.url))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 260)
+            Text("In your own words").font(Scaled.style(11, .medium)).foregroundStyle(.secondary)
+            TextField("What does it say, and why does it matter?", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(3...8)
+                .padding(8)
+                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                .focused($focused)
+            HStack {
+                Button("Later") { dismiss() }
+                Spacer()
+                Button("Save Summary") { save(text); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
+        .onAppear { focused = true }
+    }
+}

@@ -177,6 +177,7 @@ struct AIUseView: View {
     @State private var armed = false
     @State private var copied = ""
     @State private var showDeclaration = false
+    @State private var showReflection = false
     @State private var renaming: AIUse?
     @State private var newName = ""
     @State private var renames = 0
@@ -191,6 +192,8 @@ struct AIUseView: View {
             Divider().opacity(0.4)
             if showDeclaration {
                 declaration
+            } else if showReflection {
+                ReflectionView(project: model.filter, entries: model.entries).id(model.filter)
             } else if let entry = model.entries.first(where: { $0.id == model.selected }) {
                 AIUseEditor(model: model, entry: entry, armed: $armed).id("\(entry.id)-\(renames)")  // reloaded after a rename
             } else {
@@ -202,7 +205,7 @@ struct AIUseView: View {
         }
         .onAppear { model.load() }
         .onChange(of: model.filter) { _, _ in Task { await model.reload() } }
-        .onChange(of: model.selected) { _, _ in showDeclaration = false }
+        .onChange(of: model.selected) { _, _ in showDeclaration = false; showReflection = false }
         .pageActions { HStack(spacing: 14) { RecentlyDeletedButton(kind: "ai-use", project: model.filter, inHeader: true) { Task { await model.reload() } }; addButton } }
         .confirmationDialog("Delete this entry?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Delete", role: .destructive) { if let id = deleting { model.delete(id) }; deleting = nil }
@@ -223,7 +226,7 @@ struct AIUseView: View {
     private var up: Int { oldestFirst ? 1 : -1 }   // a step up the list as shown
 
     private var addButton: some View {
-        Button { showDeclaration = false; model.add() } label: { HeaderIcon("plus") }
+        Button { showDeclaration = false; showReflection = false; model.add() } label: { HeaderIcon("plus") }
             .buttonStyle(.borderless)
             .help("Log AI use")
     }
@@ -238,8 +241,12 @@ struct AIUseView: View {
             .labelsHidden()
             .padding(.top, 12)
             OrderPicker(oldestFirst: $oldestFirst)
-            Button { showDeclaration = true; Task { await model.draft() } } label: {
+            Button { showReflection = false; showDeclaration = true; Task { await model.draft() } } label: {
                 Label("Disclosure", systemImage: "checkmark.seal").frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .glassButton()
+            Button { showDeclaration = false; showReflection = true } label: {
+                Label("Reflection", systemImage: "pencil.line").frame(maxWidth: .infinity, alignment: .leading)
             }
             .glassButton()
             // Rows drawn by Referee, full width and in line with the buttons above, at any width.
@@ -277,13 +284,20 @@ struct AIUseView: View {
                 }
             }
             Menu {
-                Button(copied == "markdown" ? "Copied" : "Copy as Markdown") { copy("markdown") }
-                Button("Save as LaTeX…") { saveLatex() }
+                SwiftUI.Section("Declaration and reflection") {
+                    Button(copied == "reflection" ? "Copied" : "Copy as LaTeX") { copyReflection() }
+                    Button(copied == "reflection-text" ? "Copied" : "Copy as Text") { copyReflection(as: "text") }
+                    Button("Save as a Separate Page…") { saveReflection() }
+                }
+                SwiftUI.Section("Full record") {
+                    Button(copied == "markdown" ? "Copied" : "Copy as Markdown") { copy("markdown") }
+                    Button("Save as LaTeX…") { saveLatex() }
+                }
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
             .fixedSize()
-            .help("The disclosure and the full record, for an appendix")
+            .help("The declaration and reflection, or the full record for an appendix")
             .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)  // fills its column, so it doesn't shift when the editor changes
@@ -305,6 +319,31 @@ struct AIUseView: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             flash(format)
+        }
+    }
+
+    private var reflectionQuery: String { model.filter.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
+
+    /// The declaration and reflection, to paste where you want them: LaTeX, or plain text for Word or Markdown.
+    private func copyReflection(as format: String = "latex") {
+        Task {
+            guard let data = await API.request("ai-log/reflection/export?project=\(reflectionQuery)&format=\(format)", timeout: 10),
+                  let text = String(data: data, encoding: .utf8) else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            flash(format == "text" ? "reflection-text" : "reflection")
+        }
+    }
+
+    /// Or as a page of its own, a .tex file starting with \newpage, for \input.
+    private func saveReflection() {
+        Task {
+            guard let data = await API.request("ai-log/reflection/export?project=\(reflectionQuery)&page=true", timeout: 10),
+                  let text = String(data: data, encoding: .utf8) else { return }
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "declaration-and-reflection.tex"
+            guard panel.runModal() == .OK, let file = panel.url else { return }
+            try? text.write(to: file, atomically: true, encoding: .utf8)
         }
     }
 
@@ -567,6 +606,106 @@ struct DisclosureView: View {
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled else { return }
             _ = await API.post("ai-log/disclosure", ["project": project, "text": value])
+        }
+    }
+}
+
+
+/// The reflection on your work, for the separate page with the declaration: the guidelines' two
+/// prompts, answered in your own words, with your own record beside them for reference. Nothing is
+/// written for you; Check asks questions about your draft and never rewrites it.
+struct ReflectionView: View {
+
+    let project: String
+    let entries: [AIUse]
+    @State private var structure = ""
+    @State private var difficulty = ""
+    @State private var loaded = false
+    @State private var saving: Task<Void, Never>?
+    @State private var feedback: String?
+    @State private var checking = false
+    @State private var meetings: [[String: Any]] = []
+
+    var body: some View {
+        Page {
+            if project == "all" || project == "none" {
+                Text("Choose a project above: each has its own reflection.").foregroundStyle(.secondary)
+            } else {
+                Text("Reflection on your work").font(Fonts.heading(28, .regular))
+                Text("A few sentences, in your own words.")
+                    .font(Scaled.style(11, .regular)).foregroundStyle(.secondary)
+                    .padding(.top, 2)
+                Hairline().padding(.vertical, 22)
+                VStack(alignment: .leading, spacing: 24) {
+                    PageSection("How did you structure your arguments?") {
+                        MarkdownField(placeholder: "How you approached each part, and in what order", text: $structure)
+                    }
+                    PageSection("Where did you find the main difficulty?") {
+                        MarkdownField(placeholder: "What was hard, and what made it hard", text: $difficulty)
+                    }
+                    HStack(spacing: 8) {
+                        Button("Check My Reflection") { check() }.glassButton().disabled(checking)
+                        if checking { ProgressView().controlSize(.small) }
+                    }
+                    if let feedback {
+                        Text(feedback).font(Scaled.style(12, .regular)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(10)
+                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    PageSection("Your record, for reference") { record }
+                }
+            }
+        }
+        .task { await load() }
+        .onChange(of: structure) { _, _ in keep() }
+        .onChange(of: difficulty) { _, _ in keep() }
+    }
+
+    /// Your AI use entries, oldest first, and this project's meetings: what you did, to write from.
+    private var record: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(entries.filter { !$0.isBlank }.sorted { $0.date != $1.date ? $0.date < $1.date : $0.rank < $1.rank }) { entry in
+                (Text(entry.day).foregroundStyle(.secondary) + Text(" · " + (entry.purpose.isEmpty ? "AI use" : entry.purpose)))
+                    .font(Scaled.style(12, .regular))
+            }
+            if !meetings.isEmpty {
+                ForEach(Array(meetings.enumerated()), id: \.offset) { _, meeting in
+                    Text("Meeting · " + [meeting["date"] as? String, meeting["title"] as? String].compactMap { $0 }.joined(separator: " · "))
+                        .font(Scaled.style(12, .regular)).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var query: String { project.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
+
+    private func load() async {
+        let saved = await API.getPath("ai-log/reflection?project=\(query)") ?? [:]
+        structure = saved["structure"] as? String ?? ""
+        difficulty = saved["difficulty"] as? String ?? ""
+        meetings = await API.getList("meetings?project=\(query)")
+        loaded = true
+    }
+
+    /// Saved shortly after typing stops.
+    private func keep() {
+        guard loaded else { return }
+        saving?.cancel()
+        saving = Task {
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            _ = await API.post("ai-log/reflection", ["project": project, "structure": structure, "difficulty": difficulty])
+        }
+    }
+
+    private func check() {
+        checking = true
+        Task {
+            _ = await API.post("ai-log/reflection", ["project": project, "structure": structure, "difficulty": difficulty])
+            let found = await API.post("ai-log/reflection/check", ["project": project], timeout: 60)
+            feedback = found?["feedback"] as? String ?? "Couldn't check it. Try again."
+            checking = false
         }
     }
 }

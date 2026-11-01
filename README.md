@@ -38,7 +38,7 @@ The first version was built in one day for the Invisible AI hackathon on 10 Octo
 2. Open it. The first time, macOS says it can't check the developer, because the app isn't notarised by Apple: go to **System Settings → Privacy & Security** and click **Open Anyway**. You only do this once.
 3. Choose what checks your claims, in Settings → Checks:
    - **Claude (recommended):** paste your [Anthropic API key](https://console.anthropic.com) in **Integrations** (Manage…). It's kept in your Keychain. Comparing theorems with papers needs Claude.
-   - **Ollama, on your Mac (free), on Macs with 32 GB of memory or more:** install [Ollama](https://ollama.com), then run `ollama pull qwen3:14b`. Nothing leaves your Mac. With Claude chosen, Referee also uses it when you're offline.
+   - **A model on your Mac (free), on Macs with 32 GB of memory or more:** install [Ollama](https://ollama.com) and a model of your choice to suit your Mac, at least as capable as Qwen 3 14B (`ollama pull qwen3:14b`). Nothing leaves your Mac. With Claude or ChatGPT chosen, Referee also uses it when you're offline.
 4. Add the sources you'll cite with **Add Source…** in the menu bar, or install the browser extension from Settings to collect what you read automatically. The extension works in Chromium browsers (Chrome, Brave, Edge and Arc) and also adds Referee's panel to Overleaf. Referee works with Safari too, with fewer features: Safari can't run the extension, so there's no capture while reading (add sources by hand), no highlights and no Overleaf panel, and pages behind a university login can't be fetched. For the best experience, use a Chromium browser.
 
 Referee checks your writing as you type in Word or Overleaf, and updates itself when a new release comes out. There's no Windows app yet; Windows users can run it from the code (see [Running it](#6-running-it)).
@@ -99,7 +99,7 @@ If a sentence makes no claim and nothing you read relates to it, Referee stays s
 
 **Notes.** Reading notes by project, each optionally linked to a saved source and a page or range of pages: "Def 4.35, basis" on pages 57–61 of your lecture notes. Clicking a note opens the source at that page, in your browser; if it's already open in a tab, the browser extension switches to that tab at the page instead of opening another. Referee also uses them: in projects where you keep notes, a claim or theorem supported by a page you haven't noted gets a short hint, in Word and Overleaf. It's information, not a warning: you don't have to note everything you cite.
 
-Notes are filtered by source, by topic (sorted by Claude, which can be switched off) and by your own folders, any number at once, and sorted newest first, by page or A to Z; the filters are kept for each project. Naming a statement in a note ("Theorem 4.50(a)", "Theorem (p. 55)") or quoting it shows the statement as the source prints it. **Add to Notes** from search quotes the passage and leaves the summary line for you to write, since writing it is part of learning it; **Check My Summary** asks questions about your note rather than rewriting it.
+Notes are filtered by source, by topic (sorted by Claude, which can be switched off) and by your own folders, any number at once, and sorted newest first, by page or A to Z; the filters are kept for each project. Naming a statement in a note ("Theorem 4.50(a)", "Theorem (p. 55)") or quoting it shows the statement as the source prints it. **Add to Notes** (right-click a search result) quotes the passage, linked to its page, then opens Notes and asks for your summary in your own words, since writing it is part of learning it. A quoted passage always shows a picture of it on its page; **Check My Summary** asks questions about your note rather than rewriting it.
 
 **Referee links.** Notes and meetings have **Copy Link**, giving a `referee://` link to paste into a planner, Notion, a to-do list or anywhere else; clicking it opens Referee right there (a note opens its source at the page). `referee://source?url=…&page=…` opens any saved source at a page. Todoist tasks made from meeting action points link back to their meeting.
 
@@ -128,7 +128,7 @@ Browser extension, Add Source ──capture──▶ Backend (your laptop) ◀�
                                 ├─ verify.py     Claude (or ChatGPT, or a local model):
                                 │                supports / contradicts / neutral,
                                 │                plus quote and copying checks
-                                ├─ statements.py Claude: a restated theorem against the cited paper
+                                ├─ statements.py Claude Sonnet: a restated theorem against the cited paper
                                 ├─ code_folder.py uncited libraries, figures that don't match results
                                 └─ feedback.py   learns which markers each person finds useful
 ```
@@ -143,9 +143,9 @@ Browser extension, Add Source ──capture──▶ Backend (your laptop) ◀�
 
 **Learning.** Behaviour events become labelled examples, with explicit actions weighted fully and implicit ones weighted less. A logistic regression on verifier confidence, search similarity and marker type is refitted after every event. Until there are enough events to cover both outcomes, every marker the verifier accepts is shown, so the evaluated threshold acts as the prior.
 
-**Theorems.** A theorem or definition that cites a paper is searched for only in that paper's saved passages, and Claude compares the two statements, listing only mathematical differences. Displayed equations and theorem headings are kept together with their statements when papers are read, so a statement split across lines by a web page or LaTeX isn't lost.
+**Theorems.** A theorem or definition that cites a paper is searched for only in that paper's saved passages, and Claude Sonnet (or ChatGPT; never a local model) compares the two statements, listing only mathematical differences. Displayed equations and theorem headings are kept together with their statements when papers are read, so a statement split across lines by a web page or LaTeX isn't lost.
 
-**Privacy.** Only the sentence or statement being checked and its closest passages are sent to Claude. The reading, your code, meetings and AI use log stay on your machine.
+**Privacy.** For a check, only the sentence or statement being checked and its closest passages are sent to the AI provider you chose (nothing, with a model on your Mac). Your reading, code, meetings and AI use log stay on your machine. A few features send more, each listed with a switch on **What leaves this device**: Claude sorting notes into topics, writing lines for notes (off by default), and Check My Summary, which sends that note and its passage.
 
 ## 3. Data and models
 
@@ -156,7 +156,11 @@ Browser extension, Add Source ──capture──▶ Backend (your laptop) ◀�
 | all-MiniLM-L6-v2 (ONNX) | Local sentence embeddings for search, run with ONNX Runtime |
 | [SwiftMath](https://github.com/mgriebling/SwiftMath) (MIT) | Typesetting the LaTeX in notes, meetings and reports, in Latin Modern |
 | Qwen 2.5 7B or Qwen 3 14B, through Ollama | Claim verification on your own computer (free, offered on Macs with 32 GB of memory or more) |
-| Claude Haiku 5.5 | Claim verification and theorem comparison, through the Anthropic API (most accurate) |
+| Claude Haiku 5.5 | Claim verification, topics for notes and Check My Summary, through the Anthropic API (recommended) |
+| Claude Sonnet 5.5 | Comparing theorems and definitions with the papers they cite (caught 14 of 14 real differences in 28 lecture-note statements, against 12 for Haiku) |
+| GPT-5.5 nano and GPT-5.5 | Claim verification (nano) and theorem comparison (GPT-5.5) with your own OpenAI key, as an alternative to Claude |
+| Apple Vision and PDFKit | Reading scanned pages and screenshots, and pictures of statements as their PDF prints them, on your Mac |
+| [KaTeX](https://katex.org) (MIT) | Typesetting maths in the browser panels |
 | doi.org, Crossref, arXiv | Paper details, abstracts, retractions, LaTeX sources and HTML versions |
 | Wikipedia, NHS and BBC pages | Captured during development and used for the wording calibration |
 
@@ -207,7 +211,7 @@ The same 100 pairs, the same prompt and the same 0.7 threshold, with models run 
 | Apple's on-device model | 0.64 | 0.52–0.75 | 0.59 | 11 of 15 | about 7 s |
 | DeBERTa-v3-large, entailment only | 0.49 (raw accuracy) | – | – | 9 of 15 | about 1 s |
 
-Claude is recommended. On Macs with 32 GB of memory or more, Qwen 2.5 7B is the free option: about nine in ten claims it marks as backed really are, at about 5 seconds a check and half the memory of Qwen 3 14B (about 4.6 GB while checking, against 9.3 GB). Qwen 3 14B finds a little more, for Macs with memory to spare. It still misses about a third of contradictions (calling them neutral), so a check that flags nothing isn't proof that nothing's wrong.
+Claude is recommended. On Macs with 32 GB of memory or more, a local model is the free option; Qwen 3 14B is the minimum we suggest: about nine in ten claims it marks as backed really are, at about 12 seconds a check (about 9.3 GB of memory while checking). Qwen 2.5 7B is faster and lighter but finds less. Local models still miss about a third of contradictions (calling them neutral), so a check that flags nothing isn't proof that nothing's wrong.
 
 Local models are slow to write, so for them each passage's sentences are numbered and the model answers with a number ("2.3") instead of copying out a quote; Referee then takes the quote from the passage, so it's always exact. For Qwen 3 14B this cut a check from about 17 to 12 seconds and raised recall from 0.63 to 0.74, with precision unchanged (0.90 to 0.91). The Apple and DeBERTa rows were measured before this change. Qwen 3 with thinking switched on took about three minutes a check on this computer. Apple's on-device model and the DeBERTa entailment model (trained on everyday sentences, not research) were too often wrong to offer. Comparing theorems with papers isn't offered with local models.
 
@@ -322,7 +326,13 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r server/requirements.txt
 ```
 
-Add your Anthropic API key in Referee's settings (the Mac app, or the extension's library on any system). It's checked with Anthropic, then kept in your computer's password store (Keychain or Credential Manager). Alternatively, copy `server/.env.example` to `server/.env` and put the key there. Never commit that file.
+Choose what checks your claims in Referee's settings (the Mac app, or the extension's library on any system):
+
+- **Claude (recommended):** your Anthropic API key, in **Integrations**. It's checked with Anthropic, then kept in your computer's password store (Keychain or Credential Manager). Comparing theorems with papers uses Claude Sonnet.
+- **ChatGPT:** your OpenAI API key, in the same place. Claims are checked with GPT-5.5 nano, and theorems compared with the larger GPT-5.5, as Claude uses Haiku and Sonnet. A ChatGPT subscription doesn't include API access.
+- **A model on your Mac (free), on Macs with 32 GB of memory or more:** install [Ollama](https://ollama.com) and a model of your choice to suit your Mac, at least as capable as Qwen 3 14B (`ollama pull qwen3:14b`). Nothing leaves your Mac. With Claude or ChatGPT chosen, it also takes over when you're offline.
+
+Alternatively, copy `server/.env.example` to `server/.env` and put a key there. Never commit that file.
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
@@ -347,7 +357,7 @@ python eval_scifact.py analyse
 python eval_wording.py
 ```
 
-On a Mac, `sh macapp/build.sh` builds **Referee.app** from this folder and installs it in `/Applications`; `sh macapp/package.sh 2026-10-12` builds the downloadable version instead, named for its release, with its own Python, code and libraries inside, as `macapp/dist.noindex/Referee-mac.zip` and its checksum (Apple silicon); publish both as a GitHub release of the same name, and downloaded copies update themselves. The app lives in the menu bar (a whistle: outlined when idle, filled while capturing) and runs the server and the Word helper while it's open. Its menu has research mode, the current project, how long unsaved reading is kept, Add Source, the library, Notes, Meetings, AI Use and settings (the research mode shortcut, Word and Overleaf settings, the code folder, opening at login, whether to show in the menu bar, and Integrations: the Anthropic API key and Todoist). With the menu bar icon hidden, open Referee from Applications or Spotlight to get to settings, the library, meetings and AI use. On Windows, `scripts\install-windows.bat` starts the server and Word helper at login. `tests/smoke_test.py` checks the background parts work, without Word or an API key; GitHub runs it on Windows and macOS after every push. See `word-helper/README.md`.
+On a Mac, `sh macapp/build.sh` builds **Referee.app** from this folder and installs it in `/Applications`; `sh macapp/package.sh v1.0.1` builds the downloadable version instead, named for its release tag, with its own Python, code and libraries inside, as `macapp/dist.noindex/Referee-mac.zip` and its checksum (Apple silicon); publish both as a GitHub release of the same name, and downloaded copies update themselves. The app has one main window with a sidebar (Library, Evidence, Notes, Meetings, Calendar and AI Use, the current project and its due date) and Settings, and a menu bar icon (a whistle: outlined when idle, filled while capturing) with research mode, the current project, Add Source and search. It runs the server and, if you write in Word, the Word helper while it's open. On Windows, `scripts\install-windows.bat` starts the server and Word helper at login. `tests/smoke_test.py` checks the background parts work, without Word or an API key; GitHub runs it on Windows and macOS after every push. See `word-helper/README.md`.
 
 To switch research mode on with a macOS Focus, create two automations in the Shortcuts app: when the Focus turns on, run the shell script `curl -s -X POST localhost:8000/focus -H 'Content-Type: application/json' -d '{"on":true}'`, and when it turns off, the same with `false`.
 
@@ -375,8 +385,7 @@ To load the extension, open `chrome://extensions`, turn on **Developer mode**, c
 | `POST /writing`, `GET /writing` | | marks or reports an active writing session (automatic mode) |
 | `POST /clear` | | forgets all captured reading |
 | `POST /highlights`, `GET /highlights?url=` | `{url, text}` | keeps text highlighted while reading; lists a source's highlights |
-| `GET /presubmission?project=` | | the Before You Submit report, as a web page |
-| `GET /trail?project=` | | the Research Trail, as a web page |
+| `GET /trail?project=&style=` | | the Research trail, as a web page |
 | `GET /export?format=bibtex\|ris&project=` | | saved sources as a BibTeX or RIS file |
 | `POST /import` | `{text}` (a BibTeX or RIS file) | fetches and saves each entry; returns how many were added and which failed |
 | `POST /sources/add-url` | `{url}` | adds a page, PDF or YouTube video by its link, kept in the current project |
@@ -384,7 +393,7 @@ To load the extension, open `chrome://extensions`, turn on **Developer mode**, c
 | `POST /sources/forget-temporary` | | forgets reading that hasn't been saved or cited |
 | `POST /projects/rename` | `{old, new}` | renames a project, or deletes it when `new` is empty (its sources stay) |
 | `GET /references?project=&style=` | | the reference list for what's been cited |
-| `GET /report?project=&style=` | | the proof-of-work report, as a web page |
+| `GET /report?project=&style=` | | the Research trail, as a web page (kept for older links) |
 | `GET /api-key`, `POST /api-key`, `DELETE /api-key` | `{key}` | whether a key is saved; checks and saves one; removes it |
 | `POST /statement` | `{statement, kind, keys, label}` | a theorem or definition compared with the cited paper: `{found, quote, page, source, differences}` |
 | `POST /code` | `{text}` (the LaTeX) | against the code folder: `{folder, software, numbers}` |
@@ -397,11 +406,21 @@ To load the extension, open `chrome://extensions`, turn on **Developer mode**, c
 | `GET /meetings?project=`, `POST /meetings`, `DELETE /meetings?id=` | a meeting | lists, saves or deletes meetings |
 | `GET /meetings/export?project=&format=` | | `markdown`, `latex`, `decision-notes` or `who-did-what` |
 | `GET /meetings/workspace?project=`, `POST /meetings/workspace` | `{project, folder}` | the shared workspace where a project's notes files are kept up to date |
-| `GET /notes?project=`, `POST /notes`, `DELETE /notes?id=` | a note: `{project, text, url, page, to}` | lists, saves or deletes reading notes |
+| `GET /notes?project=`, `POST /notes`, `DELETE /notes?id=` | a note: `{project, title, body, attachments, folder}` | lists, saves or deletes reading notes |
+| `POST /notes/from-passage` | `{query, text, url, page, source, project}` | a note quoting a search result, linked to its page |
+| `POST /notes/check` | `{id}` | Check My Summary: questions about a note, never a rewrite |
+| `GET /notes/topics?project=` | | each note's topic, sorted by Claude |
+| `POST /statements/preview` | `{text, urls}` | the statement a note line names or quotes, as its source prints it, with its page |
+| `GET /claims/order`, `POST /claims/order` | `{document, sentences}` | a document's sentences in order, for the Evidence report |
+| `GET /projects/due`, `POST /projects/due` | `{project, date}` | projects' due dates |
+| `GET /privacy`, `POST /privacy` | `{name, on}` | the switches on What leaves this device |
+| `GET /recently-deleted`, `POST /recently-deleted/restore` | `{id}` | Recently Deleted, and putting one back |
+| `GET /backups`, `POST /backups`, `POST /backups/restore` | `{folder, automatic}` or `{path}` | backups, weekly backups and restoring one |
 | `GET /todoist`, `POST /todoist`, `DELETE /todoist` | `{token}` | Todoist connection: status; checks and saves a token; disconnects |
 | `POST /todoist/sync` | | syncs action points with Todoist now (otherwise every three minutes, and after each meeting change) |
 | `GET /ai-log?project=`, `POST /ai-log`, `DELETE /ai-log?id=` | an entry | lists, saves or deletes AI use entries |
 | `GET /ai-log/declaration?project=` | | the project's declaration, and its template |
+| `GET /ai-log/disclosure?project=&format=`, `POST /ai-log/disclosure` | `{project, format, text, given, unused, opening, redraft}` | the disclosure in a format, your edits, and wording you've been given |
 | `POST /ai-log/template` | `{project, preset, used, unused}` | sets a project's declaration wording: `paragraph`, or `custom` with its text |
 | `GET /ai-log/export?project=&format=markdown\|latex` | | the declaration and the full record |
 

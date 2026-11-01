@@ -348,6 +348,55 @@ def delete_ai_use(purpose: str, confirm: bool = False) -> str:
     return f"AI use entry “{e['purpose']}” deleted. It's in Recently Deleted (AI Use) for 30 days."
 
 
+# The disclosure and the reflection on your work, as shown on AI Use's Disclosure and Reflection pages.
+
+@referee.tool()
+def read_disclosure() -> str:
+    """The current project's AI use disclosure as Referee shows it (with any edits the person made), the
+    wording they've been given if any, and their reflection on their work."""
+    project = urllib.parse.quote(_project())
+    shown = _call(f"ai-log/disclosure?project={project}") or {}
+    reflection = _call(f"ai-log/reflection?project={project}") or {}
+    parts = [f"Disclosure ({shown.get('format', '')}{', edited by the person' if shown.get('edited') else ''}):\n{shown.get('text', '')}"]
+    if shown.get("given"):
+        parts.append(f"Wording given (with placeholders), when AI was used:\n{shown['given']}")
+    if shown.get("unused"):
+        parts.append(f"Wording given, when AI wasn't used:\n{shown['unused']}")
+    parts.append("Reflection, how they structured their arguments:\n" + (reflection.get("structure") or "(empty)"))
+    parts.append("Reflection, where they found the main difficulty:\n" + (reflection.get("difficulty") or "(empty)"))
+    return "\n\n".join(parts)
+
+
+@referee.tool()
+def edit_disclosure(text: Optional[str] = None, given_wording: Optional[str] = None,
+                    wording_without_ai: Optional[str] = None, redraft: bool = False) -> str:
+    """Change the current project's disclosure, only when the person asks. text replaces the disclosure
+    shown (kept as the person's edit). given_wording is the wording they've been given for when AI was used,
+    with {tools}, {system}, {purposes} and {checks} where the log fills in; wording_without_ai is for when
+    it wasn't. redraft discards edits and drafts again from the log."""
+    body = {"project": _project()}
+    if given_wording is not None or wording_without_ai is not None:
+        body.update(format="given", given=given_wording, unused=wording_without_ai)
+    if redraft:
+        body["redraft"] = True
+    if text is not None:
+        body["text"] = text
+    shown = _call("ai-log/disclosure", body) or {}
+    return "Disclosure updated. It now reads:\n" + shown.get("text", "")
+
+
+@referee.tool()
+def edit_reflection(structure: Optional[str] = None, difficulty: Optional[str] = None) -> str:
+    """Set the current project's reflection on their work: how they structured their arguments, and where
+    they found the main difficulty. Only with the person's own words, when they ask: never write it for them."""
+    project = _project()
+    saved = _call(f"ai-log/reflection?project={urllib.parse.quote(project)}") or {}
+    _call("ai-log/reflection", {"project": project,
+                                "structure": saved.get("structure", "") if structure is None else structure,
+                                "difficulty": saved.get("difficulty", "") if difficulty is None else difficulty})
+    return f"Reflection saved in {project or 'no project'}."
+
+
 # Library: a saved source's name, citation details, project, or forgetting it.
 
 @referee.tool()

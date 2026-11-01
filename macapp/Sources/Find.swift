@@ -242,14 +242,17 @@ final class FindModel: ObservableObject {
         }
     }
 
-    /// A new note from a passage, titled by the search, with a line like your other notes
-    /// ("**Definition 5.1**: ...", written by Claude), linked to the passage's page. Opens Notes to show it.
+    /// A new note from a passage, titled by the search, linked to the passage's page. Opens Notes,
+    /// which asks for your own summary (or shows Claude's line, if that's switched on).
     static func note(quoting text: String, url: String, page: Int?, source: String, project: String?) {
         Task {
-            _ = await API.post("notes/from-passage", ["query": FindModel.last, "text": text, "url": url, "page": page as Any,
-                                                      "source": source, "project": project ?? ""], timeout: 30)
+            let note = await API.post("notes/from-passage", ["query": FindModel.last, "text": text, "url": url, "page": page as Any,
+                                                             "source": source, "project": project ?? ""], timeout: 30)
+            // Unless Claude wrote its line, Notes asks for your own summary of it.
+            if let id = note?["id"] as? String, (note?["body"] as? String ?? "").hasPrefix(">") { NotesModel.awaitingSummary = id }
             Floating.close("find")
             Windows.open("notes")
+            NotificationCenter.default.post(name: .refereeNoteAdded, object: nil)
         }
     }
 

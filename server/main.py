@@ -677,7 +677,8 @@ def note_from_passage(body: dict):
     title = (query[:1].upper() + query[1:]) if query else str(body.get("source", "")) + (f", p. {body['page']}" if body.get("page") else "")
     url = str(body.get("url", ""))
     note = {"id": uuid.uuid4().hex, "project": body.get("project") or reading.project or "", "title": title,
-            "body": line or own_line(statement_of(text, "")) + "\n\n" + "\n".join("> " + l for l in text.splitlines()),
+            # Without Claude's line, only the passage: Referee then asks the person for their own summary.
+            "body": (line + "\n\n" if line else "") + "\n".join("> " + l for l in text.splitlines()),
             "files": [], "created": time.time(),
             "attachments": [{"url": url, "page": body.get("page"), "to": None}] if url else []}
     return notes.save(note)
@@ -1872,7 +1873,9 @@ def statement_preview(body: dict):
         # A quote from a source: found on its page and shown as printed there.
         quote = text.lstrip("> ").strip()
         for url in urls:
-            page = statement_lookup.page_of(quote, url)
+            # Found in the PDF's text, or else by the saved passage it was quoted from (which knows its
+            # page), so a quote added from search always finds its page.
+            page = statement_lookup.page_of(quote, url) or passage_page(quote, url)
             if page:
                 picture = page_crop.image(url, page, quote)
                 found.append({"kind": "Quote", "number": "", "text": quote, "page": page, "url": url,
@@ -1892,6 +1895,15 @@ def statement_preview(body: dict):
                 found.append({**hit, "url": url, "source": source_title(url), "scanned": scanned, "image": picture})
                 break
     return found
+
+
+def passage_page(quote: str, url: str):
+    # The page of the saved passage a quote was taken from, matched on its opening words.
+    squash = lambda t: re.sub(r"\W+", "", t).lower()
+    start = squash(quote)[:80]
+    if len(start) < 20:
+        return None
+    return next((page for text, page in stored_passages(url) if page and start in squash(text)), None)
 
 
 def stored_passages(url: str) -> list:
@@ -2018,3 +2030,63 @@ def capture_url(req: CaptureUrlRequest):
     if html is None:
         return {"ok": False, "reason": "Could not fetch that URL."}
     return capture(CaptureRequest(url=req.url, html=html))
+
+# The reflection on your work, for the page with the declaration: two prompts, answered by the person.
+REFLECTION_FEEDBACK = (
+    "Someone has drafted a short reflection on their own written project, answering two prompts: how they "
+    "structured their arguments, and where they found the main difficulty. It goes with their work. Ask about anything missing or vague: a part of the work it "
+    "doesn't cover, a difficulty named without saying what made it hard, a claim about the process their AI "
+    "use record doesn't bear out. Ask questions only: never write sentences for them, suggest wording or "
+    "rewrite theirs. If it answers both prompts clearly, say so in one line. At most four short sentences, plain text."
+)
+
+
+@app.get("/ai-log/reflection")
+def get_reflection(project: str):
+    saved = (ai_log.templates.get(project) or {}).get("reflection") or {}
+    return {"structure": saved.get("structure", ""), "difficulty": saved.get("difficulty", "")}
+
+
+@app.post("/ai-log/reflection")
+def save_reflection(body: dict):
+    project = body.get("project", "")
+    ai_log.templates.setdefault(project, {})["reflection"] = {
+        "structure": body.get("structure", ""), "difficulty": body.get("difficulty", "")}
+    ai_log._save_templates()
+    return {"ok": True}
+
+
+@app.post("/ai-log/reflection/check")
+def check_reflection(body: dict):
+    # Questions about the person's draft, against the two prompts and their own AI use record. Never a rewrite.
+    from verify import anthropic_client, MODEL
+    project = body.get("project", "")
+    saved = get_reflection(project)
+    if not (saved["structure"].strip() or saved["difficulty"].strip()):
+        return {"feedback": "Write something first."}
+    client = anthropic_client.get()
+    if not client:
+        return {"feedback": "Checking needs Claude: add your key in Settings → Integrations, and be online."}
+    record = "\n".join(f"- {e['date']}: {e['purpose']} ({e['tool']})" for e in reversed(ai_log.all(project)))
+    reply = client.messages.create(model=MODEL, max_tokens=1000, system=REFLECTION_FEEDBACK, messages=[{"role": "user", "content":
+        f"How they structured their arguments:\n{saved['structure']}\n\nWhere they found the main difficulty:\n"
+        f"{saved['difficulty']}\n\nTheir AI use record:\n{record or '(none)'}"}])
+    return {"feedback": "".join(b.text for b in reply.content if b.type == "text").strip()}
+
+
+@app.get("/ai-log/reflection/export", response_class=PlainTextResponse)
+def export_reflection(project: str, page: bool = False, format: str = "latex"):
+    # The declaration as currently shown, then the reflection: in LaTeX, to paste in or as a page of its
+    # own, or as plain text with Markdown headings, for Word or a Markdown file.
+    from meetings import _tex
+    declared = ai_log.disclosure(project, referee_use(project))["text"]
+    saved = get_reflection(project)
+    if format == "text":
+        parts = ["## Declaration of Authenticity and AI use", declared.strip(), "## Reflection on my work"]
+        parts += [t.strip() for t in (saved["structure"], saved["difficulty"]) if t.strip()]
+        return "\n\n".join(parts) + "\n"
+    block = lambda text: "\n\n".join(" \\\\\n".join(_tex(l) for l in part.split("\n")) for part in text.strip().split("\n\n"))
+    out = ([r"\newpage"] if page else []) + [r"\section*{Declaration of Authenticity and AI use}", block(declared), "",
+           r"\section*{Reflection on my work}"]
+    out += [block(t) + "\n" for t in (saved["structure"], saved["difficulty"]) if t.strip()]
+    return "\n".join(out).rstrip() + "\n"

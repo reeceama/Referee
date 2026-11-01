@@ -2,6 +2,15 @@
 
 What changed in each release of Referee, newest first. Releases are numbered (`v1.0.0`), and downloaded copies of Referee for Mac update themselves to the latest one.
 
+## 1.0.1 (1 November 2026, `v1.0.1`)
+
+- Disclosures list tools, purposes and checks with commas rather than semicolons, in every format.
+- The **Claude connector** can read and edit the disclosure (including wording you've been given) and your reflection, when you ask.
+- **Reflection** in AI Use: the two questions a reflection on your work answers (how you structured your arguments, where the main difficulty was), each answered in your own words, with your AI use record and meetings beside them for reference. **Check My Reflection** asks about anything missing, never rewriting it, and **Export** gives the declaration and reflection together, to copy as LaTeX or plain text (for Word or Markdown), or as a separate LaTeX page.
+- **Add to Notes** from search now opens Notes and asks for your summary in your own words, with the passage shown as its page prints it. Notes no longer start with an empty "-" line. With "Claude writes lines for notes" switched on, Claude's line is added as before.
+- A quote added from search now always shows its page picture, even where the PDF's text doesn't match the passage exactly (maths often doesn't).
+- The README covers the whole app: choosing Claude, ChatGPT or a model on your Mac, what each sends, Sonnet for theorems, and the current API.
+
 ## 1.0.0 (29 October 2026, `v1.0.0`)
 
 The first full release, compared with the hackathon submission below. Referee is now a Mac app for anyone who writes from sources, not only academic work.
