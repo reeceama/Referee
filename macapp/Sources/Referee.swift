@@ -595,6 +595,7 @@ struct SettingsView: View {
     @State private var local: [String: Any] = [:]   // which local models this Mac has
     @State private var openAIKey = ""
     @State private var showPrivacy = false
+    @State private var integrating = false   // Integrations open in place, with a way back
     @State private var copiedPairing = false
 
     /// The Google Docs add-on's files and its setup guide, inside the app (or the code folder).
@@ -610,6 +611,18 @@ struct SettingsView: View {
     var embedded = false   // shown in the main window, beside its sidebar, rather than in its own
 
     var body: some View {
+        if integrating {
+            VStack(alignment: .leading, spacing: 0) {
+                Button { integrating = false } label: { Label("Settings", systemImage: "chevron.left") }
+                    .buttonStyle(.link).padding(.horizontal, 20).padding(.top, 12)
+                IntegrationsView(model: model)
+            }
+        } else {
+            settings
+        }
+    }
+
+    @ViewBuilder private var settings: some View {
         if embedded {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -681,9 +694,13 @@ struct SettingsView: View {
                     }
                 }
                 row("Setup") { Button("Run Setup Again") { Windows.open("setup") } }
-                row("Integrations", last: true) {
-                    Button("Manage") { Windows.open("integrations") }
+                Button { integrating = true } label: {
+                    row("Integrations", last: true) {
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
             group("Checks", footer: checksFooter) {
                 row("Check claims with", last: aiProvider != "ollama") {

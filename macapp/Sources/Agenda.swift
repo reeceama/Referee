@@ -17,6 +17,8 @@ struct AgendaItem: Identifiable {
     let open: () -> Void
     /// Choices on right-click: done or submitted, and delete.
     var menu: [(String, () -> Void)] = []
+    /// A Todoist task, edited in place when clicked.
+    var todoist: [String: Any]? = nil
 }
 
 @MainActor
@@ -40,6 +42,17 @@ final class AgendaModel: ObservableObject {
     /// Bumped when the days first load, so the page opens on today (but not when earlier weeks arrive).
     @Published var opened = 0
 
+    /// Todoist, when it's the to-do app: its projects (for new tasks) and the task open for editing.
+    @Published var todoistOn = false
+    var currentProject = ""
+    @Published var todoistProjects: [[String: Any]] = []
+    @Published var editing: String?
+
+    func closeTask(_ id: String) async {
+        _ = await API.post("todoist/task/close", ["id": id], timeout: 20)
+        load(keepPlace: true)
+    }
+
     /// A task ticked off or deleted from the calendar, in the meeting (or list) it belongs to.
     func change(_ actionID: String, in meetingID: String, delete: Bool) async {
         guard let data = await API.request("meetings?project=all"),
@@ -55,6 +68,7 @@ final class AgendaModel: ObservableObject {
     func load(keepPlace: Bool = false) {
         Task {
             let current = (await API.get("settings"))?["project"] as? String ?? ""
+            currentProject = current
             let inScope: (String?) -> Bool = { [everyProject] project in everyProject || (project ?? "") == current }
             let calendar = Calendar.current
             let today = calendar.startOfDay(for: Date())
@@ -64,11 +78,39 @@ final class AgendaModel: ObservableObject {
             let day = DateFormatter()
             day.dateFormat = "yyyy-MM-dd"
 
+            // Todoist's tasks with dates, in projects named after Referee's (your project work, not the rest
+            // of your life). Action points sent there show once, as the Todoist task.
+            let settings = await API.get("settings")
+            let refereeProjects = Set(settings?["projects"] as? [String] ?? [])
+            var sentToTodoist = Set<String>()
+            let todo = (await API.get("tasks"))?["app"] as? String == "todoist" ? await API.get("todoist/tasks") : nil
+            todoistOn = todo?["ok"] as? Bool == true
+            todoistProjects = todo?["projects"] as? [[String: Any]] ?? []
+            for t in todo?["tasks"] as? [[String: Any]] ?? [] {
+                let project = t["project"] as? String ?? ""
+                guard everyProject ? refereeProjects.contains(project) : project == current,
+                      let id = t["id"] as? String, let date = (t["date"] as? String).flatMap(day.date(from:)) else { continue }
+                sentToTodoist.insert(id)
+                let shown = max(date, date < today ? today : date)   // overdue ones on today
+                var time: Date?
+                if let at = t["time"] as? String, at.count == 5 {
+                    time = calendar.date(bySettingHour: Int(at.prefix(2)) ?? 0, minute: Int(at.suffix(2)) ?? 0, second: 0, of: shown)
+                }
+                let priority = t["priority"] as? Int ?? 4
+                let colour: Color = [1: .red, 2: .orange, 3: .blue][priority] ?? .secondary
+                let detail = (date < today ? "Overdue · " : "") + "Todoist" + (priority < 4 ? " · P\(priority)" : "")
+                    + ((t["repeat"] as? String ?? "never") != "never" ? " · Repeats" : "")
+                items.append((shown, AgendaItem(id: "t-\(id)", kind: .task, title: t["content"] as? String ?? "", time: time,
+                                                detail: detail, colour: colour, open: { [weak self] in self?.editing = self?.editing == "t-\(id)" ? nil : "t-\(id)" },
+                                                menu: [("Mark as Done", { Task { await self.closeTask(id) } })], todoist: t)))
+            }
+
             // Referee's own meetings.
             let allMeetings = await API.getList("meetings?project=all").filter { inScope($0["project"] as? String) }
             for m in allMeetings {
                 // Its action points with due dates, on the day they're due (overdue ones on today).
-                for a in m["actions"] as? [[String: Any]] ?? [] where a["done"] as? Bool != true {
+                for a in m["actions"] as? [[String: Any]] ?? [] where a["done"] as? Bool != true
+                    && !sentToTodoist.contains(a["task_id"] as? String ?? "-") {
                     guard let text = a["text"] as? String, !text.isEmpty,
                           let due = (a["due"] as? String).flatMap(DueText.date), due < end, let mid = m["id"] as? String else { continue }
                     let aid = a["id"] as? String ?? ""
@@ -112,14 +154,22 @@ final class AgendaModel: ObservableObject {
             let dues = await ProjectDue.everything()
             for (name, due) in dues.dates where inScope(name) && due >= start && due < end {
                 let done = dues.submitted[name] != nil
-                items.append((due, AgendaItem(id: "due-\(name)", kind: .task, title: "\(name) due", time: nil,
-                                              detail: done ? "Submitted" : "Project deadline", colour: done ? .green : .red, open: {})))
+                items.append((due, AgendaItem(id: "due-\(name)", kind: .task, title: "\(name) due", time: ProjectDue.timed(due) ? due : nil,
+                                              detail: done ? "Submitted" : "Project deadline", colour: done ? .green : .red, open: {},
+                                              menu: [(done ? "Mark as Not Submitted" : "Mark as Submitted", {
+                                                         Task { await ProjectDue.submit(name, !done); self.load(keepPlace: true) } }),
+                                                     ("Delete Due Date", {
+                                                         Task {
+                                                             _ = await API.post("projects/due", ["project": name])
+                                                             NotificationCenter.default.post(name: .refereeDueChanged, object: nil)
+                                                             self.load(keepPlace: true)
+                                                         } })])))
             }
             // Named deadlines besides a project's due date.
             for deadline in await ProjectDue.deadlines() where inScope(deadline.project) && deadline.date >= start && deadline.date < end {
                 let done = deadline.submitted
                 let (project, id) = (deadline.project, deadline.id)
-                items.append((deadline.date, AgendaItem(id: "dl-\(id)", kind: .task, title: deadline.name, time: nil,
+                items.append((deadline.date, AgendaItem(id: "dl-\(id)", kind: .task, title: deadline.name, time: ProjectDue.timed(deadline.date) ? deadline.date : nil,
                                                         detail: done ? "Submitted" : "Deadline · \(project)", colour: done ? .green : .red,
                                                         open: {},
                                                         menu: [(done ? "Mark as Not Submitted" : "Mark as Submitted", {
@@ -189,7 +239,9 @@ struct AgendaView: View {
                         Menu {
                             Button("Meeting") { newMeeting(on: day.date) }
                             Button("Deadline") { adding = (day.date, true) }
-                            Button("Task") { adding = (day.date, false) }
+                            Button("Task") {
+                                if model.todoistOn { newTask = day.date } else { adding = (day.date, false) }
+                            }
                         } label: { Image(systemName: "plus").font(.system(size: Scaled.s(16), weight: .medium)) }
                             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
                             .help("Add a meeting, deadline or task on this day")
@@ -211,12 +263,19 @@ struct AgendaView: View {
                             }
                             .contentShape(Rectangle())
                         // Left-click opens it; right-click to tick it off or delete it.
-                        Button(action: item.open) { row }.buttonStyle(.plain)
-                            .contextMenu {
-                                ForEach(item.menu.indices, id: \.self) { i in
-                                    Button(item.menu[i].0, role: item.menu[i].0.hasPrefix("Delete") ? .destructive : nil, action: item.menu[i].1)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Button(action: item.open) { row }.buttonStyle(.plain)
+                                .contextMenu {
+                                    ForEach(item.menu.indices, id: \.self) { i in
+                                        Button(item.menu[i].0, role: item.menu[i].0.hasPrefix("Delete") ? .destructive : nil, action: item.menu[i].1)
+                                    }
+                                }
+                            if let task = item.todoist, model.editing == item.id {
+                                TodoistTaskEditor(task: task, projects: model.todoistProjects) {
+                                    model.editing = nil; model.load(keepPlace: true)
                                 }
                             }
+                        }
                         .padding(.leading, 68)
                     }
                     Hairline().padding(.leading, 68).padding(.top, 8)
@@ -249,6 +308,17 @@ struct AgendaView: View {
         }
         }
         .onAppear { model.load(); meetings.load() }
+        .sheet(isPresented: Binding(get: { newTask != nil }, set: { if !$0 { newTask = nil } })) {
+            if let newTask {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("New task").font(.headline)
+                    TodoistTaskEditor(task: ["date": TodoistTaskEditor.day.string(from: newTask)], projects: model.todoistProjects,
+                                      project: model.currentProject) { self.newTask = nil; model.load(keepPlace: true) }
+                    HStack { Spacer(); Button("Cancel") { self.newTask = nil }.keyboardShortcut(.cancelAction) }
+                }
+                .padding(20).frame(width: 480)
+            }
+        }
         .sheet(isPresented: Binding(get: { adding != nil }, set: { if !$0 { adding = nil } })) {
             if let adding {
                 AddToDay(date: adding.date, deadline: adding.deadline) { model.load(keepPlace: true) }
@@ -257,6 +327,7 @@ struct AgendaView: View {
     }
 
     @State private var adding: (date: Date, deadline: Bool)?
+    @State private var newTask: Date?   // a new Todoist task on this day
     @State private var picking = false
     @State private var chosen = Date()
 
@@ -309,7 +380,7 @@ enum ProjectDue {
         var dates: [String: Date] = [:], submitted: [String: Date] = [:]
         for (name, value) in await API.get("projects/due") ?? [:] {
             let entry = value as? [String: Any] ?? [:]
-            if let date = (entry["date"] as? String).flatMap(format.date(from:)) { dates[name] = date }
+            if let date = (entry["date"] as? String).flatMap(format.date(from:)) { dates[name] = at(entry["time"], on: date) }
             if let when = (entry["submitted"] as? String).flatMap(format.date(from:)) { submitted[name] = when }
         }
         return (dates, submitted)
@@ -323,10 +394,22 @@ enum ProjectDue {
         for (project, value) in await API.get("projects/due") ?? [:] {
             for d in (value as? [String: Any])?["deadlines"] as? [[String: Any]] ?? [] {
                 guard let id = d["id"] as? String, let date = (d["date"] as? String).flatMap(format.date(from:)) else { continue }
-                found.append((project, id, d["name"] as? String ?? "Deadline", date, d["submitted"] as? String != nil))
+                found.append((project, id, d["name"] as? String ?? "Deadline", at(d["time"], on: date), d["submitted"] as? String != nil))
             }
         }
         return found
+    }
+
+    /// A day with its time ("17:00"), when one was set.
+    static func at(_ time: Any?, on day: Date) -> Date {
+        guard let text = time as? String, text.count == 5, let h = Int(text.prefix(2)), let m = Int(text.suffix(2)) else { return day }
+        return Calendar.current.date(bySettingHour: h, minute: m, second: 0, of: day) ?? day
+    }
+
+    /// Whether a due date has a time of day (a date alone is midnight).
+    static func timed(_ date: Date) -> Bool {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return parts.hour != 0 || parts.minute != 0
     }
 
     static func deadline(_ body: [String: Any]) async {
@@ -344,12 +427,13 @@ enum ProjectDue {
     static func describe(_ date: Date) -> String {
         let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()),
                                                    to: Calendar.current.startOfDay(for: date)).day ?? 0
-        let when = date.formatted(.dateTime.day().month(.abbreviated))
+        let clock = timed(date) ? " at " + date.formatted(date: .omitted, time: .shortened) : ""
+        let when = date.formatted(.dateTime.day().month(.abbreviated)) + clock
         switch days {
         case ..<(-1): return "\(-days) days overdue · \(when)"
         case -1: return "1 day overdue · \(when)"
-        case 0: return "Due today"
-        case 1: return "Due tomorrow"
+        case 0: return date < Date() && timed(date) ? "Overdue · today\(clock)" : "Due today\(clock)"
+        case 1: return "Due tomorrow\(clock)"
         default: return "Due in \(days) days · \(when)"
         }
     }
@@ -361,6 +445,8 @@ struct DueDatePicker: View {
     let done: () -> Void
     @State private var tasks: [[String: Any]] = []
     @State private var date = Date()
+    @State private var timed = false
+    @State private var time = Calendar.current.date(bySettingHour: 17, minute: 0, second: 0, of: Date()) ?? Date()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -389,9 +475,11 @@ struct DueDatePicker: View {
             FieldLabel("Or pick a date")
             HStack {
                 DatePicker("", selection: $date, displayedComponents: .date).labelsHidden()
+                Toggle("Time", isOn: $timed)
+                if timed { DatePicker("", selection: $time, displayedComponents: .hourAndMinute).labelsHidden() }
                 Button("Set") {
                     let format = DateFormatter(); format.dateFormat = "yyyy-MM-dd"
-                    save(["date": format.string(from: date)])
+                    save(["date": format.string(from: date)].merging(timed ? ["time": TodoistTaskEditor.clock.string(from: time)] : [:]) { a, _ in a })
                 }
                 Spacer()
                 Button("Clear") { save([:]) }
@@ -403,7 +491,7 @@ struct DueDatePicker: View {
             .help("Stops the due date warning. Click “Submitted” in the sidebar to undo.")
         }
         .padding(16)
-        .frame(width: 380)
+        .frame(width: 440)
         .task { tasks = await API.getList("todoist/dated") }
     }
 
@@ -451,6 +539,8 @@ struct AddToDay: View {
     @State private var project = ""
     @State private var name = ""
     @State private var day = Date()
+    @State private var timed = false
+    @State private var time = Calendar.current.date(bySettingHour: 17, minute: 0, second: 0, of: Date()) ?? Date()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -459,6 +549,12 @@ struct AddToDay: View {
             TextField(deadline ? "Name" : "Task", text: $name).textFieldStyle(.roundedBorder)
             Picker("Project", selection: $project) { ForEach(projects, id: \.self) { Text($0).tag($0) } }
             DatePicker(deadline ? "Due" : "By", selection: $day, displayedComponents: .date)
+            if deadline {
+                HStack {
+                    Toggle("Time", isOn: $timed)
+                    if timed { DatePicker("", selection: $time, displayedComponents: .hourAndMinute).labelsHidden() }
+                }
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -481,7 +577,8 @@ struct AddToDay: View {
         format.dateFormat = "yyyy-MM-dd"
         let text = name.trimmingCharacters(in: .whitespaces)
         if deadline {
-            await ProjectDue.deadline(["project": project, "name": text, "date": format.string(from: day)])
+            await ProjectDue.deadline(["project": project, "name": text, "date": format.string(from: day),
+                                       "time": timed ? TodoistTaskEditor.clock.string(from: time) : NSNull()])
             return
         }
         // Added to the project's tasks without a meeting, made if it isn't there yet.
@@ -497,6 +594,160 @@ struct AddToDay: View {
         list.actions.append(action)
         if let body = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(list)) as? [String: Any] {
             _ = await API.post("meetings", body)
+        }
+    }
+}
+
+
+/// A Todoist task, edited in Referee: name, notes, date and time, repeat, priority, project and labels
+/// (reminders are left to your calendar app, so they aren't sent twice). Saving sends it to Todoist at once; a new task (no "id") is created there.
+struct TodoistTaskEditor: View {
+
+    static let day: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f }()
+    static let clock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
+
+    let task: [String: Any]
+    let projects: [[String: Any]]
+    var project = ""
+    let done: () -> Void
+
+    @State private var content = ""
+    @State private var notes = ""
+    @State private var dated = true
+    @State private var date = Date()
+    @State private var timed = false
+    @State private var time = Date()
+    @State private var repeatEvery = "never"
+    @State private var priority = 4
+    @State private var projectID = ""
+    @State private var labels = ""
+    @State private var newProject = ""
+    @State private var naming = false
+    @State private var extraProjects: [[String: Any]] = []
+    @State private var busy = false
+    @State private var problem: String?
+    @State private var deleting = false
+
+    private var isNew: Bool { task["id"] == nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Task", text: $content).textFieldStyle(.roundedBorder)
+            TextField("Notes", text: $notes, axis: .vertical).lineLimit(1...4).textFieldStyle(.roundedBorder)
+            HStack(spacing: 10) {
+                Toggle("Date", isOn: $dated)
+                if dated {
+                    DatePicker("", selection: $date, displayedComponents: .date).labelsHidden()
+                    Toggle("Time", isOn: $timed)
+                    if timed { DatePicker("", selection: $time, displayedComponents: .hourAndMinute).labelsHidden() }
+                }
+                Spacer()
+            }
+            HStack(spacing: 10) {
+                Picker("Priority", selection: $priority) {
+                    ForEach(1...4, id: \.self) { Text("P\($0)").tag($0) }
+                }.fixedSize()
+                if dated {
+                    Picker("Repeat", selection: $repeatEvery) {
+                        Text("Never").tag("never"); Text("Daily").tag("daily"); Text("Weekly").tag("weekly")
+                        Text("Monthly").tag("monthly"); Text("Yearly").tag("yearly")
+                        if task["repeat"] as? String == "custom" { Text(task["repeat_text"] as? String ?? "Custom").tag("custom") }
+                    }.fixedSize()
+                }
+                Spacer()
+            }
+            HStack(spacing: 10) {
+                Picker("Project", selection: $projectID) {
+                    ForEach(Array((projects + extraProjects).enumerated()), id: \.offset) { _, p in
+                        Text(p["name"] as? String ?? "").tag(p["id"] as? String ?? "")
+                    }
+                }.fixedSize()
+                if naming {
+                    TextField("Project name", text: $newProject).textFieldStyle(.roundedBorder).frame(width: 160)
+                        .onSubmit { makeProject() }
+                    Button("Add") { makeProject() }.disabled(newProject.trimmingCharacters(in: .whitespaces).isEmpty)
+                } else {
+                    Button("New project") { naming = true }.buttonStyle(.link)
+                }
+                Spacer()
+            }
+            TextField("Labels, separated by commas", text: $labels).textFieldStyle(.roundedBorder)
+            if let problem { Text(problem).font(Scaled.style(11, .regular)).foregroundStyle(.red) }
+            HStack {
+                if !isNew {
+                    Button("Delete", role: .destructive) { deleting = true }
+                }
+                Spacer()
+                if busy { ProgressView().controlSize(.small) }
+                Button(isNew ? "Add to Todoist" : "Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(busy || content.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .confirmationDialog("Delete “\(content)”?", isPresented: $deleting) {
+            Button("Delete", role: .destructive) { remove() }
+        } message: { Text("It’s deleted in Todoist too.") }
+        .onAppear(perform: fill)
+    }
+
+    private func fill() {
+        content = task["content"] as? String ?? ""
+        notes = task["description"] as? String ?? ""
+        let day = (task["date"] as? String).flatMap(Self.day.date(from:))
+        dated = day != nil || isNew
+        date = day ?? Date()
+        if let at = task["time"] as? String, let t = Self.clock.date(from: at) { timed = true; time = t }
+        repeatEvery = task["repeat"] as? String ?? "never"
+        priority = task["priority"] as? Int ?? 4
+        labels = (task["labels"] as? [String] ?? []).joined(separator: ", ")
+        projectID = task["project_id"] as? String
+            ?? projects.first { $0["name"] as? String == project }?["id"] as? String
+            ?? projects.first?["id"] as? String ?? ""
+    }
+
+    private func makeProject() {
+        let name = newProject.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        Task {
+            if let made = await API.post("todoist/project", ["name": name], timeout: 20), made["ok"] as? Bool == true {
+                extraProjects.append(made)
+                projectID = made["id"] as? String ?? projectID
+                (naming, newProject) = (false, "")
+            } else {
+                problem = "Couldn’t make the project in Todoist. Try again."
+            }
+        }
+    }
+
+    private func save() {
+        busy = true
+        problem = nil
+        var body: [String: Any] = [
+            "content": content, "description": notes, "priority": priority, "project_id": projectID,
+            "labels": labels.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
+            "repeat": dated ? repeatEvery : "never", "repeat_text": task["repeat_text"] as? String ?? "",
+            "was_project": task["project_id"] as? String ?? ""]
+        if let id = task["id"] { body["id"] = id }
+        if dated { body["date"] = Self.day.string(from: date) }
+        if dated && timed { body["time"] = Self.clock.string(from: time) }
+        Task {
+            let sent = await API.post("todoist/task", body, timeout: 30)
+            busy = false
+            if sent?["ok"] as? Bool == true {
+                done()
+            } else {
+                problem = "Couldn’t save to Todoist. Try again."
+            }
+        }
+    }
+
+    private func remove() {
+        guard let id = task["id"] as? String else { return }
+        Task {
+            _ = await API.post("todoist/task/delete", ["id": id], timeout: 20)
+            done()
         }
     }
 }

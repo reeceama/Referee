@@ -638,6 +638,8 @@ struct ProjectPopover: View {
         }
     }
 
+    @State private var showArchived = false
+
     private var list: some View {
         Group {
             ForEach([""] + projects, id: \.self) { project in
@@ -654,11 +656,22 @@ struct ProjectPopover: View {
             }
             if !library.archived.isEmpty {
                 Divider().padding(.vertical, 4)
-                Text("Archived").font(Scaled.style(11, .regular)).foregroundStyle(.secondary).padding(.horizontal, 10)
-                ForEach(library.archived, id: \.self) { project in
+                // Folded away until opened, so archived projects aren't one click from being brought back.
+                Button { showArchived.toggle() } label: {
+                    HStack(spacing: 8) {
+                        Color.clear.frame(width: 14, height: 1)
+                        Text("Archived (\(library.archived.count))").foregroundStyle(.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.system(size: Scaled.s(10), weight: .semibold))
+                            .foregroundStyle(.secondary).rotationEffect(.degrees(showArchived ? 90 : 0))
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if showArchived { ForEach(library.archived, id: \.self) { project in
                     row(project) { library.archive(project, false); choose(project); close() }
                         .help("Bring it back and make it current")
-                }
+                } }
             }
         }
     }
@@ -666,7 +679,10 @@ struct ProjectPopover: View {
     private func row(_ title: String, check: Bool? = nil, destructive: Bool = false, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack {
-                if let check { Image(systemName: "checkmark").opacity(check ? 1 : 0) }
+                // A gutter on every row, as in macOS menus: the current project's tick sits in it, and all
+                // the text lines up beside it.
+                Image(systemName: "checkmark").font(.system(size: Scaled.s(11), weight: .semibold))
+                    .opacity(check == true ? 1 : 0).frame(width: 14)
                 Text(title).foregroundStyle(destructive ? Color.red : Color.primary)
                 Spacer()
             }

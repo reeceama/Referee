@@ -2,6 +2,15 @@
 
 What changed in each release of Referee, newest first. Releases are numbered (`v1.0.0`), and downloaded copies of Referee for Mac update themselves to the latest one.
 
+## 1.0.3 (6 November 2026, `v1.0.3`)
+
+- **Todoist in the calendar**: with Todoist as your to-do app, its tasks in projects named after your Referee projects show on their days. Click one to edit it in place (name, notes, date and time, repeat, priority, project and labels), right-click to mark it done, and ＋ → **Task** makes a new one in any Todoist project, or a new project. Changes go to Todoist at once. Reminders are left to your calendar app, so none are sent twice. Action points already sent to Todoist show once.
+- **Times on due dates and deadlines**: a project's due date or a named deadline can have a time, shown in the calendar and the countdown ("Due today at 17:00").
+- **Right-click a project's due date** in the calendar to mark it submitted or delete it. Clearing a due date no longer removes the project's other deadlines.
+- **Archived projects** are left out of the Library, Notes, Checks and AI use across all projects, and kept as they were until unarchived. Their tasks and deadlines stay in the calendar.
+- **Project menu**: the current project's tick sits in a column on the left, with every item level beside it, and archived projects are folded under **Archived**.
+- **Integrations** opens inside Settings, with a way back, instead of in its own window.
+
 ## 1.0.2 (1 November 2026, `v1.0.2`)
 
 - **Mark as Submitted**: click a project's due date under its name to tick it off. Its warning stops, and the calendar keeps the date with a green tick.

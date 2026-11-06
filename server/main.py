@@ -582,7 +582,7 @@ def open_source(url: str, page: Optional[int] = None):
 
 @app.get("/notes")
 def list_notes(project: str = "all"):
-    return notes.all(library_project(project))
+    return unarchived(notes.all(library_project(project)), library_project(project))
 
 
 @app.post("/notes")
@@ -811,6 +811,32 @@ def todoist_status():
     return todoist_sync.status()
 
 
+@app.get("/todoist/tasks")
+def todoist_tasks():
+    found = todoist.all_tasks()
+    return {"ok": found is not None, "tasks": found or [], "projects": todoist.projects() if found is not None else []}
+
+
+@app.post("/todoist/task")
+def todoist_save(body: dict):
+    return todoist.save_task(body)
+
+
+@app.post("/todoist/task/close")
+def todoist_close(body: dict):
+    return {"ok": todoist.close_task(body.get("id") or "")}
+
+
+@app.post("/todoist/task/delete")
+def todoist_delete(body: dict):
+    return {"ok": todoist.delete_task(body.get("id") or "")}
+
+
+@app.post("/todoist/project")
+def todoist_project(body: dict):
+    return todoist.new_project(body.get("name") or "")
+
+
 @app.post("/todoist")
 def todoist_connect(body: dict):
     # Checks and saves a Todoist token, then syncs your action points straight away.
@@ -867,9 +893,13 @@ def set_project_due(body: dict):
     dues = _project_dues()
     name = body.get("project") or ""
     if not body.get("date") and not body.get("task"):
-        dues.pop(name, None)
+        # Clears the due date only: named deadlines and the submitted tick stay.
+        kept = dues.get(name) or {}
+        if kept.get("deadlines"):
+            kept.update(date=None, task=None, title=None)
+    
     else:
-        dues[name] = {"date": body.get("date"), "task": body.get("task"), "title": body.get("title"),
+        dues[name] = {"date": body.get("date"), "time": body.get("time"), "task": body.get("task"), "title": body.get("title"),
                       "submitted": (dues.get(name) or {}).get("submitted"),
                       "deadlines": (dues.get(name) or {}).get("deadlines") or []}
     project_due_path.write_text(json.dumps(dues, indent=1), encoding="utf-8")
@@ -899,6 +929,7 @@ def set_project_deadline(body: dict):
         submitted = body.get("submitted", bool(old.get("submitted")))
         deadlines.append({"id": body.get("id") or uuid.uuid4().hex, "name": (body.get("name") or old.get("name") or "").strip(),
                           "date": body.get("date") or old.get("date"),
+                          "time": body.get("time") if "time" in body else old.get("time"),
                           "submitted": (old.get("submitted") or date.today().isoformat()) if submitted else None})
     due["deadlines"] = sorted(deadlines, key=lambda d: d.get("date") or "")
     project_due_path.write_text(json.dumps(dues, indent=1), encoding="utf-8")
@@ -978,7 +1009,7 @@ def referee_checks(project):
 
 @app.get("/ai-log")
 def list_ai_use(project: str = "all"):
-    return ai_log.all(library_project(project))
+    return unarchived(ai_log.all(library_project(project)), library_project(project))
 
 
 @app.post("/ai-log")
@@ -1189,7 +1220,7 @@ def set_focus(req: FocusRequest):
 
 @app.get("/sources")
 def list_sources():
-    found = sources()
+    found = unarchived(sources(), None)
     cite_keys = bib.keys(found)
     return [{**s, "cite_key": cite_keys.get(s.get("url"))} for s in found]
 
@@ -1263,6 +1294,14 @@ def get_settings():
 @app.post("/settings")
 def set_settings(req: SettingsRequest):
     return reading.update(req.model_dump(exclude_none=True))
+
+
+def unarchived(items: List[dict], project: Optional[str]) -> List[dict]:
+    # Across every project, an archived project's things are left out (kept, and back when it's unarchived).
+    if project is not None or not reading.archived:
+        return items
+    gone = set(reading.archived)
+    return [i for i in items if (i.get("project") or "") not in gone]
 
 
 def library_project(project: Optional[str]):
@@ -1465,7 +1504,7 @@ def statement_for(url: str, quote: str, page: Optional[int] = None) -> Optional[
 
 @app.get("/claims")
 def list_claims(project: str = ""):
-    found = claim_log.claims(project or None)
+    found = unarchived(claim_log.claims(project or None), project or None)
     # The numbered statement behind each check ("Definition 4.17"), worked out once and kept.
     missing = [c for c in found if not c.get("statement_v4") and c.get("quote") and (c.get("source") or {}).get("url")]
     for c in missing:
