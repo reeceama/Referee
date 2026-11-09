@@ -582,7 +582,7 @@ def open_source(url: str, page: Optional[int] = None):
 
 @app.get("/notes")
 def list_notes(project: str = "all"):
-    return notes.all(library_project(project))
+    return unarchived(notes.all(library_project(project)), library_project(project))
 
 
 @app.post("/notes")
@@ -677,7 +677,8 @@ def note_from_passage(body: dict):
     title = (query[:1].upper() + query[1:]) if query else str(body.get("source", "")) + (f", p. {body['page']}" if body.get("page") else "")
     url = str(body.get("url", ""))
     note = {"id": uuid.uuid4().hex, "project": body.get("project") or reading.project or "", "title": title,
-            "body": line or own_line(statement_of(text, "")) + "\n\n" + "\n".join("> " + l for l in text.splitlines()),
+            # Without Claude's line, only the passage: Referee then asks the person for their own summary.
+            "body": (line + "\n\n" if line else "") + "\n".join("> " + l for l in text.splitlines()),
             "files": [], "created": time.time(),
             "attachments": [{"url": url, "page": body.get("page"), "to": None}] if url else []}
     return notes.save(note)
@@ -810,6 +811,32 @@ def todoist_status():
     return todoist_sync.status()
 
 
+@app.get("/todoist/tasks")
+def todoist_tasks():
+    found = todoist.all_tasks()
+    return {"ok": found is not None, "tasks": found or [], "projects": todoist.projects() if found is not None else []}
+
+
+@app.post("/todoist/task")
+def todoist_save(body: dict):
+    return todoist.save_task(body)
+
+
+@app.post("/todoist/task/close")
+def todoist_close(body: dict):
+    return {"ok": todoist.close_task(body.get("id") or "")}
+
+
+@app.post("/todoist/task/delete")
+def todoist_delete(body: dict):
+    return {"ok": todoist.delete_task(body.get("id") or "")}
+
+
+@app.post("/todoist/project")
+def todoist_project(body: dict):
+    return todoist.new_project(body.get("name") or "")
+
+
 @app.post("/todoist")
 def todoist_connect(body: dict):
     # Checks and saves a Todoist token, then syncs your action points straight away.
@@ -847,7 +874,7 @@ _due_cache: dict = {}
 
 @app.get("/projects/due")
 def project_dues():
-    # {project: {"date", "task", "title"}}, with Todoist-linked dates refreshed at most every 10 minutes.
+    # {project: {"date", "task", "title", "submitted"}}, with Todoist-linked dates refreshed at most every 10 minutes.
     dues = _project_dues()
     for name, due in dues.items():
         task = due.get("task")
@@ -866,9 +893,46 @@ def set_project_due(body: dict):
     dues = _project_dues()
     name = body.get("project") or ""
     if not body.get("date") and not body.get("task"):
-        dues.pop(name, None)
+        # Clears the due date only: named deadlines and the submitted tick stay.
+        kept = dues.get(name) or {}
+        if kept.get("deadlines"):
+            kept.update(date=None, task=None, title=None)
+        else:
+            dues.pop(name, None)
     else:
-        dues[name] = {"date": body.get("date"), "task": body.get("task"), "title": body.get("title")}
+        dues[name] = {"date": body.get("date"), "time": body.get("time"), "task": body.get("task"), "title": body.get("title"),
+                      "submitted": (dues.get(name) or {}).get("submitted"),
+                      "deadlines": (dues.get(name) or {}).get("deadlines") or []}
+    project_due_path.write_text(json.dumps(dues, indent=1), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/projects/submitted")
+def set_project_submitted(body: dict):
+    # {"project", "submitted"}: ticked off as submitted (today), so its due date stops warning; or not.
+    dues = _project_dues()
+    name = body.get("project") or ""
+    due = dues.setdefault(name, {})
+    due["submitted"] = date.today().isoformat() if body.get("submitted") else None
+    project_due_path.write_text(json.dumps(dues, indent=1), encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/projects/deadline")
+def set_project_deadline(body: dict):
+    # A named deadline besides the project's due date ("Draft to supervisor"): {"project", "id"?, "name",
+    # "date", "submitted"?} adds or changes one; {"project", "id", "delete": true} removes it.
+    dues = _project_dues()
+    due = dues.setdefault(body.get("project") or "", {})
+    deadlines = [d for d in due.get("deadlines") or [] if d.get("id") != body.get("id")]
+    if not body.get("delete"):
+        old = next((d for d in due.get("deadlines") or [] if d.get("id") == body.get("id")), {})
+        submitted = body.get("submitted", bool(old.get("submitted")))
+        deadlines.append({"id": body.get("id") or uuid.uuid4().hex, "name": (body.get("name") or old.get("name") or "").strip(),
+                          "date": body.get("date") or old.get("date"),
+                          "time": body.get("time") if "time" in body else old.get("time"),
+                          "submitted": (old.get("submitted") or date.today().isoformat()) if submitted else None})
+    due["deadlines"] = sorted(deadlines, key=lambda d: d.get("date") or "")
     project_due_path.write_text(json.dumps(dues, indent=1), encoding="utf-8")
     return {"ok": True}
 
@@ -946,7 +1010,7 @@ def referee_checks(project):
 
 @app.get("/ai-log")
 def list_ai_use(project: str = "all"):
-    return ai_log.all(library_project(project))
+    return unarchived(ai_log.all(library_project(project)), library_project(project))
 
 
 @app.post("/ai-log")
@@ -1157,7 +1221,7 @@ def set_focus(req: FocusRequest):
 
 @app.get("/sources")
 def list_sources():
-    found = sources()
+    found = unarchived(sources(), None)
     cite_keys = bib.keys(found)
     return [{**s, "cite_key": cite_keys.get(s.get("url"))} for s in found]
 
@@ -1231,6 +1295,14 @@ def get_settings():
 @app.post("/settings")
 def set_settings(req: SettingsRequest):
     return reading.update(req.model_dump(exclude_none=True))
+
+
+def unarchived(items: List[dict], project: Optional[str]) -> List[dict]:
+    # Across every project, an archived project's things are left out (kept, and back when it's unarchived).
+    if project is not None or not reading.archived:
+        return items
+    gone = set(reading.archived)
+    return [i for i in items if (i.get("project") or "") not in gone]
 
 
 def library_project(project: Optional[str]):
@@ -1433,7 +1505,7 @@ def statement_for(url: str, quote: str, page: Optional[int] = None) -> Optional[
 
 @app.get("/claims")
 def list_claims(project: str = ""):
-    found = claim_log.claims(project or None)
+    found = unarchived(claim_log.claims(project or None), project or None)
     # The numbered statement behind each check ("Definition 4.17"), worked out once and kept.
     missing = [c for c in found if not c.get("statement_v4") and c.get("quote") and (c.get("source") or {}).get("url")]
     for c in missing:
@@ -1872,7 +1944,9 @@ def statement_preview(body: dict):
         # A quote from a source: found on its page and shown as printed there.
         quote = text.lstrip("> ").strip()
         for url in urls:
-            page = statement_lookup.page_of(quote, url)
+            # Found in the PDF's text, or else by the saved passage it was quoted from (which knows its
+            # page), so a quote added from search always finds its page.
+            page = statement_lookup.page_of(quote, url) or passage_page(quote, url)
             if page:
                 picture = page_crop.image(url, page, quote)
                 found.append({"kind": "Quote", "number": "", "text": quote, "page": page, "url": url,
@@ -1892,6 +1966,15 @@ def statement_preview(body: dict):
                 found.append({**hit, "url": url, "source": source_title(url), "scanned": scanned, "image": picture})
                 break
     return found
+
+
+def passage_page(quote: str, url: str):
+    # The page of the saved passage a quote was taken from, matched on its opening words.
+    squash = lambda t: re.sub(r"\W+", "", t).lower()
+    start = squash(quote)[:80]
+    if len(start) < 20:
+        return None
+    return next((page for text, page in stored_passages(url) if page and start in squash(text)), None)
 
 
 def stored_passages(url: str) -> list:
@@ -2018,3 +2101,249 @@ def capture_url(req: CaptureUrlRequest):
     if html is None:
         return {"ok": False, "reason": "Could not fetch that URL."}
     return capture(CaptureRequest(url=req.url, html=html))
+
+# VAR: practice on the person's own write-up, and a mock viva (var.py).
+from var import Var
+
+def var_reading(query: str, project: str) -> list:
+    # The passages in a project's reading closest to a topic, for VAR to teach from and point to.
+    found = search(query, k=6, projects=reading.allowed(project) if project else None)
+    return [{"text": r["text"][:1500], "source": source_title(r["source"].get("url") or ""),
+             "url": r["source"].get("url"), "page": r.get("page")}
+            for r in sorted(found, key=lambda r: -r.get("score", 0)) if r.get("score", 0) >= 0.5][:3]
+
+
+var = Var(paths.data("var.json"), var_reading)
+
+
+@app.post("/var/document")
+def var_document(body: dict):
+    # A write-up to practise on: from the Overleaf panel, or a .tex file chosen in Referee.
+    latex = body.get("latex") or ""
+    if "\\begin{" not in latex:
+        return {"ok": False, "reason": "no_statements"}
+    return {"ok": True, **var.set_document(body.get("name") or "Write-up", latex, body.get("project") or reading.project or "")}
+
+
+@app.get("/var/files")
+def var_files(document: str):
+    return [{"name": f["name"]} for f in var.files(document)]
+
+
+@app.post("/var/files")
+def var_set_files(body: dict):
+    # A write-up's files: {"document", "add": [{"name", "latex"}], "remove": name, "project"}.
+    name = body.get("document") or "Write-up"
+    files = [f for f in var.files(name) if f["name"] != body.get("remove")]
+    for new in body.get("add") or []:
+        files = [f for f in files if f["name"] != new["name"]] + [new]
+    return var.set_files(name, files, body.get("project") or reading.project or "", body.get("purpose"))
+
+
+from github_repos import GitHubRepos
+github_repos = GitHubRepos(paths.data("github-repos.json"), paths.data("github"), var)
+
+
+@app.get("/github/status")
+def github_status():
+    # Whether the GitHub CLI is installed and signed in on this Mac; Referee never handles a token.
+    return github_repos.status()
+
+
+@app.get("/github/repos")
+def github_list():
+    return github_repos.repositories()
+
+
+@app.post("/github/repos")
+def github_choose(body: dict):
+    # {"repo", "side": "academic" | "professional" | null, "project"}: VAR may read it, or not.
+    return github_repos.choose(body.get("repo") or "", body.get("side"), body.get("project") or "")
+
+
+@app.post("/github/sync")
+def github_sync():
+    return github_repos.sync()
+
+
+@app.post("/var/context")
+def var_set_context(body: dict):
+    # {"document", "purpose"?, "context"?}: what a set is for, and the job description or audience.
+    return var.set_context(body.get("document") or "", body.get("purpose"), body.get("context"))
+
+
+@app.get("/var/documents")
+def var_documents(project: str = "all"):
+    return unarchived(var.documents(library_project(project)), library_project(project))
+
+
+@app.get("/var/items")
+def var_items(document: str):
+    return var.items(document)
+
+
+@app.delete("/var/document")
+def var_delete(name: str):
+    return var.delete(name)
+
+
+@app.get("/var/brief")
+def var_brief(project: str = ""):
+    return var.brief(project)
+
+
+@app.post("/var/brief")
+def var_set_brief(body: dict):
+    # What a project was set: the questions it answers, and its mark scheme.
+    var.set_brief(body.get("project") or "", body.get("questions") or "", body.get("scheme") or "",
+                  body.get("guide") or "", body.get("files") or [], body.get("parts") or [])
+    return {"ok": True}
+
+
+@app.post("/var/brief/find")
+def var_find_brief(body: dict):
+    # The questions answered and the mark scheme, found in the project's documents with the person's note.
+    from var import find_brief
+    try:
+        found = find_brief(body.get("files") or [], body.get("guide") or "")
+    except Exception as error:
+        # Said plainly, such as the Anthropic account being out of credit.
+        return {"ok": False, "reason": "no_credit" if "credit balance" in str(error) else "failed"}
+    return {"ok": True, **found} if found else {"ok": False, "reason": "no_api_key"}
+
+
+@app.post("/var/spoken")
+def var_spoken(body: dict):
+    # {"text", "question"} -> {"text"}: the spoken maths as LaTeX, or the transcript unchanged.
+    from var import spoken_maths
+    try:
+        return {"text": spoken_maths(body.get("text", ""), body.get("question", "")) or body.get("text", "")}
+    except Exception:
+        return {"text": body.get("text", "")}
+
+
+@app.post("/var/brief/read")
+def var_read_brief(body: dict):
+    # Each question read from its picture: {"pictures": [path, ...]} -> {"texts": [...]}, in parallel.
+    from concurrent.futures import ThreadPoolExecutor
+    from var import read_picture
+
+    def one(path):
+        try:
+            return read_picture(path)
+        except Exception:
+            return None
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return {"texts": list(pool.map(one, body.get("pictures") or []))}
+
+
+@app.post("/var/rebuild")
+def var_rebuild(body: dict):
+    # New questions from the write-up as it is now.
+    return var.rebuild(body.get("document", ""))
+
+
+@app.post("/var/question")
+def var_question(body: dict):
+    return var.question(body.get("document", ""), body.get("item", ""), body.get("task", ""))
+
+
+@app.post("/var/followup")
+def var_follow_up(body: dict):
+    return var.follow_up(body.get("document", ""), body.get("item", ""), body.get("task", ""),
+                         body.get("feedback") or {}, body.get("conversation") or [])
+
+
+@app.post("/var/followcheck")
+def var_follow_check(body: dict):
+    return var.follow_check(body.get("document", ""), body.get("item", ""), body.get("task", ""),
+                            body.get("follow", ""), body.get("answer", ""), body.get("pictures") or [])
+
+
+@app.post("/var/reset")
+def var_reset(body: dict):
+    return var.reset(body.get("item", ""), body.get("task", ""))
+
+
+@app.post("/var/assess")
+def var_assess(body: dict):
+    return var.assess(body.get("document", ""), body.get("item", ""), body.get("task", ""),
+                      body.get("answer", ""), bool(body.get("spoken")), body.get("pictures") or [],
+                      body.get("recordings") or [])
+
+
+@app.post("/var/viva")
+def var_viva(body: dict):
+    return var.mock_viva(body.get("document", ""))
+
+
+@app.post("/var/viva/answer")
+def var_viva_answer(body: dict):
+    # One answer in a mock viva, kept as it's given.
+    return var.save_answer(body.get("id", ""), int(body.get("index") or 0), body.get("answer") or {}, int(body.get("seconds") or 0))
+
+
+@app.post("/var/viva/finish")
+def var_viva_finish(body: dict):
+    return var.finish_viva(body.get("id", ""), body.get("answers") or [], int(body.get("seconds") or 0))
+
+
+# The reflection on your work, for the page with the declaration: two prompts, answered by the person.
+REFLECTION_FEEDBACK = (
+    "Someone has drafted a short reflection on their own written project, answering two prompts: how they "
+    "structured their arguments, and where they found the main difficulty. It goes with their work. Ask about anything missing or vague: a part of the work it "
+    "doesn't cover, a difficulty named without saying what made it hard, a claim about the process their AI "
+    "use record doesn't bear out. Ask questions only: never write sentences for them, suggest wording or "
+    "rewrite theirs. If it answers both prompts clearly, say so in one line. At most four short sentences, plain text."
+)
+
+
+@app.get("/ai-log/reflection")
+def get_reflection(project: str):
+    saved = (ai_log.templates.get(project) or {}).get("reflection") or {}
+    return {"structure": saved.get("structure", ""), "difficulty": saved.get("difficulty", "")}
+
+
+@app.post("/ai-log/reflection")
+def save_reflection(body: dict):
+    project = body.get("project", "")
+    ai_log.templates.setdefault(project, {})["reflection"] = {
+        "structure": body.get("structure", ""), "difficulty": body.get("difficulty", "")}
+    ai_log._save_templates()
+    return {"ok": True}
+
+
+@app.post("/ai-log/reflection/check")
+def check_reflection(body: dict):
+    # Questions about the person's draft, against the two prompts and their own AI use record. Never a rewrite.
+    from verify import anthropic_client, MODEL
+    project = body.get("project", "")
+    saved = get_reflection(project)
+    if not (saved["structure"].strip() or saved["difficulty"].strip()):
+        return {"feedback": "Write something first."}
+    client = anthropic_client.get()
+    if not client:
+        return {"feedback": "Checking needs Claude: add your key in Settings → Integrations, and be online."}
+    record = "\n".join(f"- {e['date']}: {e['purpose']} ({e['tool']})" for e in reversed(ai_log.all(project)))
+    reply = client.messages.create(model=MODEL, max_tokens=1000, system=REFLECTION_FEEDBACK, messages=[{"role": "user", "content":
+        f"How they structured their arguments:\n{saved['structure']}\n\nWhere they found the main difficulty:\n"
+        f"{saved['difficulty']}\n\nTheir AI use record:\n{record or '(none)'}"}])
+    return {"feedback": "".join(b.text for b in reply.content if b.type == "text").strip()}
+
+
+@app.get("/ai-log/reflection/export", response_class=PlainTextResponse)
+def export_reflection(project: str, page: bool = False, format: str = "latex"):
+    # The declaration as currently shown, then the reflection: in LaTeX, to paste in or as a page of its
+    # own, or as plain text with Markdown headings, for Word or a Markdown file.
+    from meetings import _tex
+    declared = ai_log.disclosure(project, referee_use(project))["text"]
+    saved = get_reflection(project)
+    if format == "text":
+        parts = ["## Declaration of Authenticity and AI use", declared.strip(), "## Reflection on my work"]
+        parts += [t.strip() for t in (saved["structure"], saved["difficulty"]) if t.strip()]
+        return "\n\n".join(parts) + "\n"
+    block = lambda text: "\n\n".join(" \\\\\n".join(_tex(l) for l in part.split("\n")) for part in text.strip().split("\n\n"))
+    out = ([r"\newpage"] if page else []) + [r"\section*{Declaration of Authenticity and AI use}", block(declared), "",
+           r"\section*{Reflection on my work}"]
+    out += [block(t) + "\n" for t in (saved["structure"], saved["difficulty"]) if t.strip()]
+    return "\n".join(out).rstrip() + "\n"

@@ -89,6 +89,9 @@ struct IntegrationsView: View {
                 }
             }
 
+            section("GitHub", footer: "VAR can practise on the repositories you tick: on the Academic side, your write-up (.tex, R Markdown or Quarto) with its code; on the Professional side, the README, code and notebooks. Referee uses the GitHub CLI signed in on this Mac, so it never sees your token, and only reads what you tick.") {
+                GitHubRepositories()
+            }
             section("Meetings", footer: "In Meetings, the calendar button lists your events from two days ago to a week ahead, from the calendars on this Mac, including Google Calendar: add your Google account in System Settings → Internet Accounts, with Calendars switched on. Referee only reads them. Choosing one starts its notes with the title, date and attendees.") {
                 row("Calendar") { Text("Ready in Meetings").foregroundStyle(.secondary) }
             }
@@ -159,7 +162,7 @@ struct IntegrationsView: View {
                 Text(URL(fileURLWithPath: folder.wrappedValue).lastPathComponent).foregroundStyle(.secondary).help(folder.wrappedValue)
                 Button("Clear") { folder.wrappedValue = ""; save("") }
             }
-            Button(folder.wrappedValue.isEmpty ? "Choose…" : "Change…") {
+            Button(folder.wrappedValue.isEmpty ? "Choose" : "Change") {
                 let panel = NSOpenPanel()
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false

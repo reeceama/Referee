@@ -141,6 +141,8 @@ class Meetings:
                          **self._todoist(meeting.get("id"), a)}
                         for a in meeting.get("actions") or []],
             "created": meeting.get("created") or time.time(),
+            # A project's tasks that came from no meeting, kept as one entry so they sync like action points.
+            **({"kind": "tasks"} if meeting.get("kind") == "tasks" else {}),
         }
         old = next((m.get("project") or "" for m in self.items if m["id"] == clean["id"]), clean["project"])
         self.items = [m for m in self.items if m["id"] != clean["id"]] + [clean]
@@ -184,7 +186,7 @@ class Meetings:
         The project's meetings, oldest first, as Markdown or LaTeX.
         """
 
-        meetings = list(reversed(self.all(project)))
+        meetings = [m for m in reversed(self.all(project)) if m.get("kind") != "tasks"]
         name = project if project else "All meetings" if project is None else "Meetings"
         return _latex(name, meetings) if format == "latex" else _markdown(name, meetings)
 

@@ -41,6 +41,12 @@ struct PrivacySection: View {
                 toggle("note_topics")
             }
 
+            heading("VAR")
+            line("Questions and assessing answers", to: "Anthropic",
+                 about: "Your write-up's statements and your answers, as text. Spoken answers are transcribed on this Mac, and the audio is never sent.") {
+                Text("When you practise").font(Scaled.style(10, .regular)).foregroundStyle(.secondary)
+            }
+
             heading("Finding sources")
             line("Paper details", to: "doi.org, Crossref, arXiv",
                  about: "A saved paper's DOI, arXiv number or title, to fetch its citation details, abstract, retraction status and LaTeX source. Off: papers are saved with only what's on the page.") {
@@ -143,8 +149,8 @@ struct BackupSection: View {
             HStack {
                 Text("Back up Referee")
                 Spacer()
-                Button("Back Up…") { backUp() }
-                Button("Restore…") { chooseRestore() }
+                Button("Back Up") { backUp() }
+                Button("Restore") { chooseRestore() }
             }
             .padding(.vertical, 8)
             Hairline()

@@ -264,8 +264,8 @@ struct LibraryView: View {
             .help(library.importing ? "Importing…" : "Import & Export")
             .popover(isPresented: Binding(get: { choosing == "transfer" }, set: { if !$0 { choosing = nil } }), arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Button("Import .bib or .ris…") { choosing = nil; library.importFile() }
-                    Button("Export .bib or .ris…") { choosing = nil; library.export() }
+                    Button("Import .bib or .ris") { choosing = nil; library.importFile() }
+                    Button("Export .bib or .ris") { choosing = nil; library.export() }
                 }
                 .buttonStyle(.plain)
                 .padding(12)
@@ -473,8 +473,8 @@ struct LibraryView: View {
                     Button("No Project") { library.move(url, to: "") }
                     ForEach(library.projects, id: \.self) { name in Button(name) { library.move(url, to: name) } }
                 }
-                Button("Rename…") { renamingSource = url; sourceName = title(source) }
-                Button("Citation Details…") {
+                Button("Rename") { renamingSource = url; sourceName = title(source) }
+                Button("Citation Details") {
                     detailing = url
                     details = ["title": source["title"] as? String ?? "", "author": source["author"] as? String ?? "",
                                "date": source["date"] as? String ?? "", "site": source["site"] as? String ?? ""]
@@ -488,7 +488,7 @@ struct LibraryView: View {
                 if !temporary { Button("Read Again") { library.reread(url) } }
                 if url.hasPrefix("file://"), url.lowercased().hasSuffix(".pdf"), let marked = library.notes[url], !marked.isEmpty,
                    let file = URL(string: url) {
-                    Button("Save a Copy with Highlights…") {
+                    Button("Save a Copy with Highlights") {
                         if let written = PDFHighlights.saveCopy(of: file, highlights: marked) {
                             let done = NSAlert()
                             done.messageText = "Saved a copy with your highlights"
@@ -500,7 +500,7 @@ struct LibraryView: View {
                     }
                 }
                 Divider()
-                Button("Forget…", role: .destructive) { forgetting = url }
+                Button("Forget", role: .destructive) { forgetting = url }
             } label: { Image(systemName: "ellipsis") }
             .menuIndicator(.hidden)
             .menuStyle(.borderlessButton)
@@ -638,27 +638,40 @@ struct ProjectPopover: View {
         }
     }
 
+    @State private var showArchived = false
+
     private var list: some View {
         Group {
             ForEach([""] + projects, id: \.self) { project in
                 row(project.isEmpty ? "No project" : project, check: project == current) { choose(project); close() }
             }
             Divider().padding(.vertical, 4)
-            row("New Project…") { name = ""; step = .new }
+            row("New Project") { name = ""; step = .new }
             if !current.isEmpty {
-                row("Due Date…") { close(); setDue() }
-                if projects.count > 1 { row("Also Cite From…") { step = .citeFrom } }
-                row("Rename…") { name = current; step = .rename }
+                row("Due Date") { close(); setDue() }
+                if projects.count > 1 { row("Also Cite From") { step = .citeFrom } }
+                row("Rename") { name = current; step = .rename }
                 row("Archive Project") { library.archive(current, true); close() }
-                row("Delete Project…", destructive: true) { deleting = true }
+                row("Delete Project", destructive: true) { deleting = true }
             }
             if !library.archived.isEmpty {
                 Divider().padding(.vertical, 4)
-                Text("Archived").font(Scaled.style(11, .regular)).foregroundStyle(.secondary).padding(.horizontal, 10)
-                ForEach(library.archived, id: \.self) { project in
+                // Folded away until opened, so archived projects aren't one click from being brought back.
+                Button { showArchived.toggle() } label: {
+                    HStack(spacing: 8) {
+                        Color.clear.frame(width: 14, height: 1)
+                        Text("Archived (\(library.archived.count))").foregroundStyle(.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.system(size: Scaled.s(10), weight: .semibold))
+                            .foregroundStyle(.secondary).rotationEffect(.degrees(showArchived ? 90 : 0))
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if showArchived { ForEach(library.archived, id: \.self) { project in
                     row(project) { library.archive(project, false); choose(project); close() }
                         .help("Bring it back and make it current")
-                }
+                } }
             }
         }
     }
@@ -666,7 +679,10 @@ struct ProjectPopover: View {
     private func row(_ title: String, check: Bool? = nil, destructive: Bool = false, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack {
-                if let check { Image(systemName: "checkmark").opacity(check ? 1 : 0) }
+                // A gutter on every row, as in macOS menus: the current project's tick sits in it, and all
+                // the text lines up beside it.
+                Image(systemName: "checkmark").font(.system(size: Scaled.s(11), weight: .semibold))
+                    .opacity(check == true ? 1 : 0).frame(width: 14)
                 Text(title).foregroundStyle(destructive ? Color.red : Color.primary)
                 Spacer()
             }

@@ -206,9 +206,9 @@ class AILog:
         if not tools:
             return None
         system = platform.mac_ver()[0]
-        return {"tools": "; ".join(tools), "system": f"macOS {system}" if system else platform.system(),
-                "purposes": _join(purposes, "; ") if purposes else "[fill in]",
-                "checks": _join(checks, "; ") if checks else "[fill in]"}
+        return {"tools": _join(tools), "system": f"macOS {system}" if system else platform.system(),
+                "purposes": _join(purposes) if purposes else "[fill in]",
+                "checks": _join(checks) if checks else "[fill in]"}
 
     def declaration(self, project: Optional[str], referee_claims: int = 0) -> str:
 
@@ -339,13 +339,13 @@ def draft(entries: List[Dict], format: str, given: str = "", unused: str = "") -
         lines = []
         for g in groups:
             parts = [f"used for {_and(g['purposes'])}" if g["purposes"] else "",
-                     f"checked: {'; '.join(g['checks'])}" if g["checks"] else ""]
-            lines.append(f"- **{g['name']}**: " + "; ".join(p for p in parts if p) + ".")
+                     f"checked: {_and(g['checks'])}" if g["checks"] else ""]
+            lines.append(f"- **{g['name']}**: " + ", ".join(p for p in parts if p) + ".")
         return "\n".join(lines)
     if format == "table":
         rows = ["| Tool | Used for | How it was checked |", "|---|---|---|"]
         cap = lambda t: t[:1].upper() + t[1:]   # each cell starts a sentence of its own
-        rows += [f"| {g['name']} | {cap(_and(g['purposes'])) if g['purposes'] else ''} | {cap('; '.join(g['checks']))} |"
+        rows += [f"| {g['name']} | {cap(_and(g['purposes'])) if g['purposes'] else ''} | {cap(_and(g['checks'])) if g['checks'] else ''} |"
                  for g in groups]
         return "\n".join(rows)
     if format == "given" and given.strip():
@@ -372,7 +372,7 @@ def _checked(checks: List[str]) -> str:
     """
 
     first = checks[0].split(" ", 1)[0].lower()
-    joined = "; ".join(checks)
+    joined = _and(checks)   # commas, as the person prefers, not semicolons
     if first.endswith("ing"):
         return f"I checked it by {joined}."
     if first.endswith("ed") or first in ("ran", "re-ran", "read", "made", "wrote", "found", "went", "did", "got", "took"):

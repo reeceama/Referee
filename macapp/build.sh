@@ -32,6 +32,28 @@ swiftc -O -target arm64-apple-macos14 -o "$APP/Contents/MacOS/referee-ocr" "$HER
 swiftc -O -target arm64-apple-macos14 -o "$APP/Contents/MacOS/referee-pagecrop" "$HERE"/PageCrop/main.swift
 cp "$MATH/LICENSE" "$APP/Contents/Resources/SwiftMath-LICENSE"
 
+# Whisper (whisper.cpp from Homebrew on this Mac), with its libraries, for VAR's spoken answers on Macs
+# without it. The speech model isn't included: the app downloads it the first time it's needed.
+if WHISPER=$(readlink -f /opt/homebrew/bin/whisper-cli 2>/dev/null); then
+  W="$APP/Contents/MacOS/whisper"
+  mkdir -p "$W"
+  cp "$WHISPER" "$W/whisper-cli"
+  cp -L /opt/homebrew/opt/whisper.cpp/lib/libwhisper.1.dylib /opt/homebrew/opt/ggml/lib/libggml.0.dylib \
+    /opt/homebrew/opt/ggml/lib/libggml-base.0.dylib /opt/homebrew/opt/ggml/libexec/*.so "$W/"
+  # Any other Homebrew library they use (libomp, for the CPU backend).
+  for dep in $(otool -L "$W"/* | awk '/\/opt\/homebrew\/opt\/(libomp)/ {print $1}' | sort -u); do cp -L "$dep" "$W/"; done
+  chmod u+w "$W"/*
+  for f in "$W"/*; do
+    for dep in $(otool -L "$f" | awk 'NR > 1 && /opt\/homebrew|@rpath/ {print $1}'); do
+      install_name_tool -change "$dep" "@loader_path/$(basename "$dep")" "$f" 2>/dev/null
+    done
+    case "$f" in *.dylib) install_name_tool -id "@loader_path/$(basename "$f")" "$f" 2>/dev/null ;; esac
+    codesign --force --sign - "$f" >/dev/null 2>&1
+  done
+  cp /opt/homebrew/opt/whisper.cpp/LICENSE "$APP/Contents/Resources/whisper.cpp-LICENSE"
+  cp /opt/homebrew/opt/ggml/LICENSE "$APP/Contents/Resources/ggml-LICENSE"
+fi
+
 cp "$HERE"/Resources/whistle*.png "$APP/Contents/Resources/"
 
 # App icon: Resources/AppIcon.png (1024px, on Apple's icon grid) at every size macOS asks for.
@@ -58,6 +80,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>1.0.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSMicrophoneUsageDescription</key><string>VAR listens to answers you give aloud, and transcribes them on this Mac.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>VAR transcribes your spoken answers on this Mac; the audio never leaves it.</string>
   <key>LSUIElement</key><true/>
   <key>CFBundleURLTypes</key>
   <array><dict>

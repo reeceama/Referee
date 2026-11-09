@@ -275,10 +275,10 @@ struct OnboardingView: View {
             .fixedSize()
             Text(writingAbout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if ["gdocs", "overleaf", "notion"].contains(writingIn) {
-                Button("Install Browser Extension…") { BrowserExtension.install(repo: repository) }
+                Button("Install Browser Extension") { BrowserExtension.install(repo: repository) }
             }
             if ["obsidian", "markdown", "quarto"].contains(writingIn) {
-                Button(writingIn == "obsidian" ? "Choose Your Vault…" : "Choose Your Writing Folder…") { chooseWritingFolder() }
+                Button(writingIn == "obsidian" ? "Choose Your Vault" : "Choose Your Writing Folder") { chooseWritingFolder() }
                 if !WordSettings.writingFolder.isEmpty {
                     Text(URL(fileURLWithPath: WordSettings.writingFolder).lastPathComponent).font(Scaled.style(10, .regular)).foregroundStyle(.secondary)
                 }
