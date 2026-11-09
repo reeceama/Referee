@@ -2,6 +2,40 @@
 
 What changed in each release of Referee, newest first. Releases are numbered (`v1.0.0`), and downloaded copies of Referee for Mac update themselves to the latest one.
 
+## 1.1.0 (9 November 2026, `v1.1.0`)
+
+- **VAR**: practise explaining your own write-up before a viva. Choose a write-up (from Overleaf or a `.tex` file) and VAR asks about its statements and arguments, checks your answers against the write-up and your reading, and asks a follow-up where an answer is unclear. Answers can be typed, drawn or spoken, and drafts are kept until checked. **Try again** lets you answer a question afresh.
+- **Mock viva**: a spoken run-through, opening with the reflection question in full, then four short questions answerable in two or three sentences. It can be paused and resumed.
+- **GitHub integration**: in Settings → Integrations, choose repositories for VAR to read through the GitHub CLI on your Mac (Referee never handles a token). On the academic side it reads the write-up (LaTeX, R Markdown or Quarto) and the code.
+- On Windows, Referee still runs from the code.
+
+## 1.0.3 (6 November 2026, `v1.0.3`)
+
+- **Todoist in the calendar**: with Todoist as your to-do app, its tasks in projects named after your Referee projects show on their days. Click one to edit it in place (name, notes, date and time, repeat, priority, project and labels), right-click to mark it done, and ＋ → **Task** makes a new one in any Todoist project, or a new project. Changes go to Todoist at once. Reminders are left to your calendar app, so none are sent twice. Action points already sent to Todoist show once.
+- **Times on due dates and deadlines**: a project's due date or a named deadline can have a time, shown in the calendar and the countdown ("Due today at 17:00").
+- **Right-click a project's due date** in the calendar to mark it submitted or delete it. Clearing a due date no longer removes the project's other deadlines.
+- **Archived projects** are left out of the Library, Notes, Checks and AI use across all projects, and kept as they were until unarchived. Their tasks and deadlines stay in the calendar.
+- **Project menu**: the current project's tick sits in a column on the left, with every item level beside it, and archived projects are folded under **Archived**.
+- **Integrations** opens inside Settings, with a way back, instead of in its own window.
+
+## 1.0.2 (1 November 2026, `v1.0.2`)
+
+- **Mark as Submitted**: click a project's due date under its name to tick it off. Its warning stops, and the calendar keeps the date with a green tick.
+- **Deadlines**: named deadlines besides a project's due date ("Draft to supervisor"), added from the calendar. The soonest one not yet submitted shows under the project's name.
+- **Tasks without a meeting**: each project has a list of tasks that came from no meeting, at the top of Meetings. They go to your to-do app like action points.
+- **Calendar**: ＋ on a day adds a meeting, a deadline or a task. Each day shows its year, and **Today** and a date picker jump to any date. Right-click a task to mark it done or delete it, or a deadline to mark it submitted or delete it.
+- Menu items and buttons no longer end in "…", and text boxes no longer show examples.
+- The README opens with a picture of Referee.
+
+## 1.0.1 (1 November 2026, `v1.0.1`)
+
+- Disclosures list tools, purposes and checks with commas rather than semicolons, in every format.
+- The **Claude connector** can read and edit the disclosure (including wording you've been given) and your reflection, when you ask.
+- **Reflection** in AI Use: the two questions a reflection on your work answers (how you structured your arguments, where the main difficulty was), each answered in your own words, with your AI use record and meetings beside them for reference. **Check My Reflection** asks about anything missing, never rewriting it, and **Export** gives the declaration and reflection together, to copy as LaTeX or plain text (for Word or Markdown), or as a separate LaTeX page.
+- **Add to Notes** from search now opens Notes and asks for your summary in your own words, with the passage shown as its page prints it. Notes no longer start with an empty "-" line. With "Claude writes lines for notes" switched on, Claude's line is added as before.
+- A quote added from search now always shows its page picture, even where the PDF's text doesn't match the passage exactly (maths often doesn't).
+- The README covers the whole app: choosing Claude, ChatGPT or a model on your Mac, what each sends, Sonnet for theorems, and the current API.
+
 ## 1.0.0 (29 October 2026, `v1.0.0`)
 
 The first full release, compared with the hackathon submission below. Referee is now a Mac app for anyone who writes from sources, not only academic work.
