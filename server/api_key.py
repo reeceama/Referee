@@ -6,6 +6,7 @@ variable) still works, for anyone who prefers that; a key saved from the app tak
 """
 
 import os
+from pathlib import Path
 from typing import Dict, Optional
 
 import importlib
@@ -38,6 +39,17 @@ def get() -> Optional[str]:
     return saved or os.environ.get("ANTHROPIC_API_KEY") or None
 
 
+def signed_in() -> bool:
+
+    """
+    Whether the person has signed in with Anthropic's ant command-line tool on this Mac. Anthropic's
+    library then finds that sign-in itself (and renews it), so no key is needed.
+    """
+
+    folder = Path.home() / ".config" / "anthropic" / "credentials"
+    return folder.is_dir() and any(folder.glob("*.json"))
+
+
 def status() -> Dict:
 
     """
@@ -50,7 +62,8 @@ def status() -> Dict:
         saved = None
     key = get()
     if not key:
-        return {"has_key": False}
+        # No key: an ant sign-in serves instead.
+        return {"has_key": True, "source": "ant", "ends": ""} if signed_in() else {"has_key": False}
     return {"has_key": True, "source": "password store" if saved else "env", "ends": key[-4:]}
 
 

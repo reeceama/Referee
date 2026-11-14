@@ -560,6 +560,14 @@ enum VARPurpose {
     static func mock(_ purpose: String) -> String {
         ["interview": "Mock interview", "briefing": "Mock Q&A"][purpose] ?? "Mock viva"
     }
+    /// The occasion itself, in a sentence: "viva", "interview", "Q&A".
+    static func noun(_ purpose: String) -> String {
+        ["interview": "interview", "briefing": "Q&A"][purpose] ?? "viva"
+    }
+    /// With its article: "a viva", "an interview", "a Q&A".
+    static func aNoun(_ purpose: String) -> String {
+        (purpose == "interview" ? "an " : "a ") + noun(purpose)
+    }
     static func context(_ purpose: String) -> String {
         ["interview": "Job description", "briefing": "Audience"][purpose] ?? "Project brief"
     }
@@ -613,7 +621,7 @@ struct VARView: View {
                               action: nil)
                 } else if model.topics.isEmpty {
                     EmptyPage(symbol: "tv", title: "No questions yet",
-                              message: model.state == "no_api_key" ? "VAR needs your Claude key, in Settings → Integrations." : "Writing the questions didn’t finish. Try again.",
+                              message: model.state == "no_api_key" ? keyProblem("no_api_key")! : "Writing the questions didn’t finish. Try again.",
                               action: ("Write questions", { model.rebuild() }))
                 } else {
                     EmptyPage(symbol: "tv", title: "Choose something to learn",
@@ -1268,7 +1276,7 @@ struct Practice: View {
                 (followVoice.text, followVoice.pictures) = ("", [])
                 saveChecked()
             } else {
-                problem = found?["reason"] as? String == "no_api_key" ? "VAR needs your Claude key, in Settings → Integrations." : "Couldn’t check the answer. Try again."
+                problem = keyProblem(found?["reason"] as? String) ?? "Couldn’t check the answer. Try again."
             }
         }
     }
@@ -1292,7 +1300,7 @@ struct Practice: View {
             } else {
                 conversation.removeLast()
                 (voice.text, voice.pictures) = (text, pictures)
-                problem = found?["reason"] as? String == "no_api_key" ? "VAR needs your Claude key, in Settings → Integrations." : "Couldn’t get a reply. Try again."
+                problem = keyProblem(found?["reason"] as? String) ?? "Couldn’t get a reply. Try again."
             }
         }
     }
@@ -1425,7 +1433,7 @@ struct Practice: View {
                 grades[task] = found?["grade"] as? Int
                 done()
             } else {
-                problem = found?["reason"] as? String == "no_api_key" ? "VAR needs your Claude key, in Settings → Integrations." : "Couldn’t check the answer. Try again."
+                problem = keyProblem(found?["reason"] as? String) ?? "Couldn’t check the answer. Try again."
             }
         }
     }
@@ -1479,7 +1487,7 @@ struct MockViva: View {
                 Text("Paused at \(clock). The question is hidden until you carry on.").foregroundStyle(.secondary).padding(.top, 8)
                 HStack(spacing: 8) {
                     Button("Resume") { resume() }.glassButton().keyboardShortcut(.defaultAction)
-                    Button("End viva") { paused = nil; finish() }.glassButton()
+                    Button("End \(VARPurpose.noun(purpose))") { paused = nil; finish() }.glassButton()
                 }
                 .padding(.top, 8)
             } else if index < questions.count {
@@ -1500,7 +1508,7 @@ struct MockViva: View {
                     .onAppear { transcriber.question = Self.vocabulary(question) }
                     .onChange(of: index) { transcriber.question = Self.vocabulary(questions[index]) }
                 HStack(spacing: 8) {
-                    Button("End viva") { finish() }.glassButton()
+                    Button("End \(VARPurpose.noun(purpose))") { finish() }.glassButton()
                     Button("Pause") { transcriber.stop(); paused = Date() }.glassButton()
                     Spacer()
                     if busy { ProgressView().controlSize(.small) }
@@ -1510,7 +1518,7 @@ struct MockViva: View {
             }
         }
         .task { transcriber.keeping = true; await start() }
-        .alert("Start the mock viva?", isPresented: $asking) {
+        .alert("Start the \(VARPurpose.mock(purpose).lowercased())?", isPresented: $asking) {
             Button("Start") { begin() }
             Button("Not now", role: .cancel) {}
         } message: {
@@ -1570,7 +1578,7 @@ struct MockViva: View {
         let seconds = report["seconds"] as? Int ?? 0
         Text("\(VARPurpose.mock(purpose)) · \(seconds / 60) min \(seconds % 60) s").font(Scaled.style(11, .regular)).foregroundStyle(.secondary)
         Text("Band \(report["band"] as? String ?? "")").font(Fonts.heading(28, .regular))
-        Text("Out of 10, against what a viva usually expects.").font(Scaled.style(11, .regular)).foregroundStyle(.secondary)
+        Text("Out of 10, against what \(VARPurpose.aNoun(purpose)) usually expects.").font(Scaled.style(11, .regular)).foregroundStyle(.secondary)
         VStack(alignment: .leading, spacing: 6) {
             ForEach(report["strong"] as? [String] ?? [], id: \.self) { line in
                 Label { MarkdownView(text: line) } icon: { Image(systemName: "checkmark").foregroundStyle(.green) }
@@ -1594,7 +1602,7 @@ struct MockViva: View {
         let done = answers.count
         return done > 0
             ? "You’re \(done) of \(questions.count) questions in. It carries on from the next one, with the clock where it stopped."
-            : "\(questions.count) questions, in a viva’s order, usually 5 to 10 minutes. The clock starts when you do."
+            : "\(questions.count) questions, in \(VARPurpose.aNoun(purpose))’s order, usually 5 to 10 minutes. The clock starts when you do."
     }
 
     private func start() async {
@@ -1606,7 +1614,7 @@ struct MockViva: View {
             index = min(answers.count, max(0, questions.count - 1))
             asking = true
         } else {
-            problem = found?["reason"] as? String == "no_api_key" ? "VAR needs your Claude key, in Settings → Integrations." : "Couldn't start the viva. Try again."
+            problem = keyProblem(found?["reason"] as? String) ?? "Couldn't start the \(VARPurpose.mock(purpose).lowercased()). Try again."
         }
     }
 
@@ -1642,7 +1650,7 @@ struct MockViva: View {
             let found = await API.post("var/viva/finish", ["id": viva?["id"] as? String ?? "", "answers": answers,
                                                           "seconds": Int(Date().timeIntervalSince(started))], timeout: 90)
             busy = false
-            if found?["ok"] as? Bool == true { report = found } else { problem = "Couldn't assess the viva. Try again."; viva = nil }
+            if found?["ok"] as? Bool == true { report = found } else { problem = keyProblem(found?["reason"] as? String) ?? "Couldn't assess the \(VARPurpose.mock(purpose).lowercased()). Try again."; viva = nil }
         }
     }
 }
@@ -1875,8 +1883,7 @@ struct BriefSheet: View {
                 scheme = found?["scheme"] as? String ?? scheme
                 await picture(found?["parts"] as? [[String: Any]] ?? [])
             } else {
-                problem = ["no_api_key": "Needs your Claude key, in Settings → Integrations.",
-                           "no_credit": "Your Anthropic account is out of credit. Add credit at console.anthropic.com, then try again."][found?["reason"] as? String ?? ""]
+                problem = keyProblem(found?["reason"] as? String) ?? ["no_credit": "Your Anthropic account is out of credit. Add credit at console.anthropic.com, then try again."][found?["reason"] as? String ?? ""]
                     ?? "Couldn’t read them. Try again."
             }
         }
@@ -2109,5 +2116,15 @@ struct GitHubRepositories: View {
             busy = nil
             await load()
         }
+    }
+}
+
+
+/// What to say when Claude can't be asked: no key or sign-in, or the key rejected.
+func keyProblem(_ reason: String?) -> String? {
+    switch reason {
+    case "no_api_key": return "VAR needs Claude: add your key, or sign in with the ant command-line tool, in Settings → Integrations."
+    case "bad_api_key": return "Claude rejected your key. It may have expired or been revoked: add a new one in Settings → Integrations."
+    default: return nil
     }
 }

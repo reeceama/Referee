@@ -2,6 +2,13 @@
 
 What changed in each release of Referee, newest first. Releases are numbered (`v1.0.0`), and downloaded copies of Referee for Mac update themselves to the latest one.
 
+## 1.1.1 (14 November 2026, `v1.1.1`)
+
+- **Sign in instead of a key**: with no key saved, Referee uses a sign-in from Anthropic's `ant` command-line tool, which renews itself. Settings shows which is in use.
+- When Claude rejects your key (expired or revoked), Referee says so, wherever it happens, instead of "Try again".
+- The mock interview and mock Q&A use their own words throughout ("End interview", "Couldn't start the mock interview"), instead of "viva".
+- The code on GitHub no longer includes a stray link to a Python environment.
+
 ## 1.1.0 (9 November 2026, `v1.1.0`)
 
 - **VAR**: practise explaining your own write-up before a viva. Choose a write-up (from Overleaf or a `.tex` file) and VAR asks about its statements and arguments, checks your answers against the write-up and your reading, and asks a follow-up where an answer is unclear. Answers can be typed, drawn or spoken, and drafts are kept until checked. **Try again** lets you answer a question afresh.

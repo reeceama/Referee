@@ -33,3 +33,4 @@ macapp/build-cache/
 
 # SwiftMath, fetched by macapp/build.sh at a fixed version
 macapp/Packages/
+.venv

@@ -1053,12 +1053,17 @@ struct ApiKeyView: View {
         VStack(alignment: .leading, spacing: 10) {
             if model.hasKey {
                 HStack {
-                    Label("Key saved, ending …\(model.keyEnds)", systemImage: "checkmark.seal.fill")
+                    Label(model.keySource == "ant" ? "Signed in with the ant command-line tool" : "Key saved, ending …\(model.keyEnds)",
+                          systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                     Spacer()
                     if model.keySource == "password store" {
                         Button("Remove") { model.removeKey() }.glassButton()
                     }
+                }
+                if model.keySource == "ant" {
+                    Text("Your sign-in renews itself. A key pasted below is used instead.")
+                        .font(Scaled.style(10, .regular)).foregroundStyle(.secondary)
                 }
                 if model.keySource == "env" {
                     Text("From server/.env. Paste a key below to keep it in the Keychain instead.")

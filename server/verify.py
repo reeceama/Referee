@@ -40,10 +40,15 @@ class Client:
 
     def get(self):
 
-        key = api_key.get()
+        # A saved key, or else the ant sign-in (Anthropic's library finds and renews it itself).
+        key = api_key.get() or ("ant" if api_key.signed_in() else None)
         with self.lock:
             if key != self.key:
-                self.client = anthropic.Anthropic(api_key=key, timeout=10.0) if key else None  # never leave the writer waiting
+                try:
+                    self.client = (anthropic.Anthropic(api_key=key, timeout=10.0) if key != "ant"   # never leave the writer waiting
+                                   else anthropic.Anthropic(timeout=10.0)) if key else None
+                except Exception:
+                    self.client = None
                 self.key = key
             return self.client
 

@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
  
+import anthropic
 import base64
 
 from extract import extract_page
@@ -1196,6 +1197,13 @@ def helper_heartbeat():
     # The background Word helper is running (the app shows a warning when it isn't).
     writing.last_helper = time.time()
     return {"ok": True}
+
+
+@app.exception_handler(anthropic.AuthenticationError)
+def rejected_key(request, error):
+    # Claude rejected the key (expired or revoked) or the sign-in: said plainly, wherever it happens.
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"ok": False, "reason": "bad_api_key"})
 
 
 @app.get("/api-key")
