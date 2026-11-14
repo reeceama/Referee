@@ -44,6 +44,33 @@ class ClaimLog:
 
         self.path.write_text(json.dumps(self.entries), encoding="utf-8")
 
+    def project_of(self, document: Optional[str]) -> Optional[str]:
+
+        """
+        The project a document's claims are already in (its most recent check), so a document stays
+        in its project whichever project is selected later.
+        """
+
+        if not document:
+            return None
+        found = [e for e in self.entries.values() if e.get("document") == document]
+        return max(found, key=lambda e: e.get("at") or 0).get("project") if found else None
+
+    def move_document(self, document: str, project: Optional[str]) -> int:
+
+        """
+        Moves every claim checked in a document to another project. Returns how many moved.
+        """
+
+        moved = 0
+        for entry in self.entries.values():
+            if entry.get("document") == document:
+                entry["project"] = project or None
+                moved += 1
+        if moved:
+            self.save()
+        return moved
+
     def record(self, sentence: str, verdict: Dict, project: Optional[str], document: Optional[str] = None) -> None:
 
         """

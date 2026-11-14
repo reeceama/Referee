@@ -231,6 +231,7 @@ class SettingsRequest(BaseModel):
     projects: list[str] | None = None
     keep_minutes: int | None = None
     links: dict[str, list[str]] | None = None
+    project_order: str | None = None   # "created" or "name"
 
 
 class RenameRequest(BaseModel):
@@ -372,8 +373,11 @@ def claims_order(body: dict):
         saved = json.loads(ORDER_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         saved = {}
-    if saved.get(document) != order:
+    # When each was last read ("_at"), so VAR can list the documents you've been writing, newest first.
+    seen = saved.setdefault("_at", {})
+    if saved.get(document) != order or time.time() - seen.get(document, 0) > 600:
         saved[document] = order
+        seen[document] = time.time()
         ORDER_FILE.write_text(json.dumps(saved), encoding="utf-8")
     return {"ok": True}
 
@@ -408,7 +412,10 @@ def check(req: CheckRequest):
     if not_claims.has(sentence):           # marked "Ignore" by the person
         return {"match": False}
  
-    project = req.project or reading.project or None
+    # A document already checked stays in its project; a new one goes to the project its title names
+    # ("PLA - Semester 1 (Individual Project)" -> "PLA Individual Project"), or else the one selected now.
+    project = (req.project or claim_log.project_of(req.document) or project_named_in(req.document)
+               or reading.project or None)
     results = search(sentence, k=5, projects=reading.allowed(project))  # 3 missed the best passage in testing
     # With maths in the sentence, also search its words alone: the notation ($v_1,\dots,v_n$) pulled in
     # passages that share the letters, and a definition written with other letters (a_1, ..., a_n)
@@ -462,6 +469,33 @@ def check(req: CheckRequest):
     return {"match": True, **verdict}
  
  
+GENERIC = {"project", "projects", "report", "notes", "coursework", "assignment", "essay", "the", "of", "and", "a", "an",
+           "for", "in", "on", "to", "online", "latex", "editor", "overleaf", "document", "google", "docs", "word"}
+
+
+def project_named_in(title: Optional[str]) -> Optional[str]:
+    # The project whose name a document's title contains (every distinctive word of it), when exactly
+    # one project's does; the one naming the most words wins between several.
+    if not title:
+        return None
+    words = set(re.findall(r"[a-z0-9]+", title.lower()))
+    scored = []
+    for name in reading.projects:
+        own = set(re.findall(r"[a-z0-9]+", name.lower())) - GENERIC
+        if own and own <= words:
+            scored.append((len(own), name))
+    scored.sort(reverse=True)
+    if scored and (len(scored) == 1 or scored[0][0] > scored[1][0]):
+        return scored[0][1]
+    return None
+
+
+@app.post("/claims/document/project")
+def move_document(body: dict):
+    # {"document", "project"}: every claim checked in the document, moved to that project ("" for none).
+    return {"ok": True, "moved": claim_log.move_document(body.get("document") or "", body.get("project") or None)}
+
+
 def in_text_citation(source: dict, page=None) -> str:
     # The in-text citation in the chosen style, for editors where Referee can't type it in
     # (Google Docs): numbered styles need the reference list's numbering, so those get the name.
@@ -1297,7 +1331,7 @@ def get_settings():
         config = json.loads((Path.home() / ".referee" / "config.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         config = {}
-    return {**reading.as_dict(), "overleaf_auto_cite": bool(config.get("overleaf_auto_cite", False))}
+    return {**reading.shown(), "overleaf_auto_cite": bool(config.get("overleaf_auto_cite", False))}
 
 
 @app.post("/settings")
@@ -2122,6 +2156,48 @@ def var_reading(query: str, project: str) -> list:
 
 
 var = Var(paths.data("var.json"), var_reading)
+
+
+def writing_documents() -> list:
+    # The documents Referee's panels and Word helper have read, with their editor, newest first.
+    try:
+        saved = json.loads(ORDER_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    seen = saved.get("_at", {})
+    found = []
+    for name, sentences in saved.items():
+        if name == "_at" or not isinstance(sentences, list) or len(sentences) < 5:
+            continue
+        editor = re.search(r"\(([^)]*)\)\s*$", name)
+        title = re.sub(r"\s*\([^)]*\)\s*$", "", name)
+        title = re.sub(r"\s*[-–|]\s*(Online LaTeX Editor )?Overleaf$|\s*-\s*Google Docs$", "", title).strip()
+        found.append({"document": name, "title": title or name, "editor": editor.group(1) if editor else "",
+                      "sentences": len(sentences), "at": seen.get(name, 0)})
+    return sorted(found, key=lambda d: -d["at"])
+
+
+@app.get("/var/writing")
+def var_writing():
+    return writing_documents()
+
+
+@app.post("/var/from-writing")
+def var_from_writing(body: dict):
+    # {"document", "purpose"}: practise on a document Referee has read in Overleaf, Google Docs or Word,
+    # from its sentences as last read; it keeps the document's project.
+    name = body.get("document") or ""
+    found = next((d for d in writing_documents() if d["document"] == name), None)
+    if not found:
+        return {"ok": False, "reason": "not_found"}
+    try:
+        sentences = json.loads(ORDER_FILE.read_text(encoding="utf-8")).get(name, [])
+    except (OSError, ValueError):
+        return {"ok": False, "reason": "not_found"}
+    purpose = body.get("purpose") or "viva"
+    project = claim_log.project_of(name) or reading.project or ""
+    var.set_files(found["title"], [{"name": found["title"], "latex": "\n".join(sentences)}], project if purpose == "viva" else "", purpose)
+    return {"ok": True, "name": found["title"]}
 
 
 @app.post("/var/document")

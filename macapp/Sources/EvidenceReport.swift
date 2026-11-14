@@ -27,12 +27,16 @@ final class EvidenceModel: ObservableObject {
         didSet { UserDefaults.standard.set(document, forKey: "lastEvidenceDocument"); Task { await loadOrder() } }
     }
     @Published var project = ""
+    /// Every project, for moving a document to another.
+    @Published var projects: [String] = []
     private var names: [String: String] = [:]   // source URL -> the name shown for it
     private var pdfs: Set<String> = []
 
     func load() {
         Task {
-            project = (await API.get("settings"))?["project"] as? String ?? ""
+            let settings = await API.get("settings")
+            project = settings?["project"] as? String ?? ""
+            projects = settings?["projects"] as? [String] ?? []
             for source in await API.getList("sources") {
                 guard let url = source["url"] as? String else { continue }
                 names[url] = [source["name"], source["title"]].compactMap { $0 as? String }.first { !$0.isEmpty } ?? url
@@ -97,6 +101,14 @@ final class EvidenceModel: ObservableObject {
     func kind(_ claim: Claim) -> String { pdfs.contains(claim.sourceURL) ? "PDF" : "web" }
 
     /// Its checks leave Evidence and the current research trail (Undo brings them back).
+    /// Moves every check in this document to another project ("" for none); later checks follow it.
+    func moveDocument(to other: String) {
+        Task {
+            _ = await API.post("claims/document/project", ["document": document, "project": other])
+            load()
+        }
+    }
+
     func removeDocument() {
         let doc = document.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
         let proj = project.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
@@ -147,9 +159,22 @@ struct EvidenceReportView: View {
                         .foregroundStyle(.secondary)
                         .help("Refresh")
                     Menu {
+                        Menu("Move to project") {
+                            Button { model.moveDocument(to: "") } label: {
+                                if model.project.isEmpty { Label("No project", systemImage: "checkmark") } else { Text("No project") }
+                            }
+                            ForEach(model.projects, id: \.self) { name in
+                                Button { model.moveDocument(to: name) } label: {
+                                    if name == model.project { Label(name, systemImage: "checkmark") } else { Text(name) }
+                                }
+                            }
+                        }
+                        .menuOrder(.fixed)
+                        Divider()
                         Button("Remove This Document", role: .destructive) { removing = true }
                     } label: { Image(systemName: "ellipsis") }
                         .accessibilityLabel("More")
+                        .menuOrder(.fixed)   // not reversed when it opens upwards
                         .menuIndicator(.hidden)
                         .menuStyle(.borderlessButton)
                         .fixedSize()

@@ -6,7 +6,12 @@ What changed in each release of Referee, newest first. Releases are numbered (`v
 
 - **Sign in instead of a key**: with no key saved, Referee uses a sign-in from Anthropic's `ant` command-line tool, which renews itself. Settings shows which is in use.
 - When Claude rejects your key (expired or revoked), Referee says so, wherever it happens, instead of "Try again".
+- **VAR reads more than LaTeX**: on either side, add a document Referee has read in Overleaf, Google Docs or Word straight from ＋, or choose or drop in Word, PDF, R Markdown, Quarto, Markdown, code or a whole project folder (the write-up first). Before, anything but LaTeX was ignored without a word; now VAR says what it couldn't read, and asks OneDrive, iCloud Drive or Google Drive to download a file kept online only.
 - The mock interview and mock Q&A use their own words throughout ("End interview", "Couldn't start the mock interview"), instead of "viva".
+- **Documents keep their project**: a document's first check goes to the project its title names ("PLA - Semester 1 (Individual Project)" to PLA Individual Project), or else the selected project, and later checks stay there whichever project is selected. **Move to project** in the Evidence report's ⋯ menu moves a document and all its checks.
+- **Sort projects** by name or by date created, from the project menu. Every list of projects follows it, and menus keep their order when they open upwards.
+- **A tidier project menu**: the current project's actions fold under **Project options**, the list scrolls after eight projects, and a search field appears once there are more than eight.
+- "Needs a source" no longer flags pieces of links or LaTeX left when a sentence is split at a link, numbers inside links, or instructions for using software (a template's sample text).
 - The code on GitHub no longer includes a stray link to a Python environment.
 
 ## 1.1.0 (9 November 2026, `v1.1.0`)

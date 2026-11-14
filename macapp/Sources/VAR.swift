@@ -340,6 +340,26 @@ final class VARModel: ObservableObject {
     @Published var changed = false
     /// What the current set is for, and its job description or audience.
     @Published var purpose = "viva"
+    /// Said when something chosen or dropped couldn't be read, rather than nothing happening.
+    @Published var notice: String?
+    /// Documents Referee has read in Overleaf, Google Docs or Word, newest first.
+    @Published var writing: [[String: Any]] = []
+
+    func loadWriting() async { writing = await API.getList("var/writing") }
+
+    /// Practise on one of those documents, from its sentences as last read.
+    func fromWriting(_ name: String, purpose: String) {
+        Task {
+            let found = await API.post("var/from-writing", ["document": name, "purpose": purpose], timeout: 15)
+            guard found?["ok"] as? Bool == true, let made = found?["name"] as? String else {
+                notice = "Couldn't read that document. Open it with Referee's panel showing, then try again."
+                return
+            }
+            if purpose != "viva" && side != "professional" { side = "professional" }
+            document = made
+            await reload()
+        }
+    }
     @Published var context = ""
     @Published var selected: String?
     private var current = ""
@@ -418,7 +438,10 @@ final class VARModel: ObservableObject {
         panel.allowsMultipleSelection = true
         panel.prompt = adding ? "Add" : "Practise on These"
         if purpose == "viva" {
-            panel.allowedContentTypes = [.init(filenameExtension: "tex")!, .zip]
+            // A write-up (LaTeX, the .zip from Overleaf, R Markdown, Quarto, a PDF or Word document), its
+            // code, or the project's folder.
+            panel.canChooseDirectories = true
+            panel.message = "Choose your write-up, its files, or the project's folder"
         } else {
             // A project folder or repository, or a report: its files' text is read.
             panel.canChooseDirectories = purpose == "interview"
@@ -472,8 +495,32 @@ final class VARModel: ObservableObject {
     /// Chosen or dropped .tex files or source .zips. A write-up can be several files (one per question,
     /// say), learnt and examined together, as a viva would.
     @discardableResult
+    /// Files kept online only (OneDrive, iCloud Drive, Google Drive) that aren't on this Mac yet: asked
+    /// to download, and named, so VAR says why it can't read them yet instead of failing.
+    static func onlineOnly(_ urls: [URL]) -> [URL] {
+        urls.filter { url in
+            // Kept online only: macOS marks the file "dataless" until its contents are downloaded.
+            var info = stat()
+            guard stat(url.path, &info) == 0, info.st_flags & UInt32(0x40000000) != 0 else { return false }   // SF_DATALESS
+            // Opening it through a file coordinator asks OneDrive, iCloud Drive or Google Drive to fetch it.
+            DispatchQueue.global(qos: .utility).async {
+                NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: nil) { _ in }
+            }
+            return true
+        }
+    }
+
     func open(_ urls: [URL], adding: Bool, purpose: String = "viva") -> Bool {
-        if purpose != "viva" {
+        let away = Self.onlineOnly(urls)
+        if !away.isEmpty {
+            notice = "\(away.map(\.lastPathComponent).joined(separator: ", ")) \(away.count == 1 ? "is" : "are") stored online only, so "
+                + "\(away.count == 1 ? "it's" : "they're") being downloaded to this Mac. Add \(away.count == 1 ? "it" : "them") again once "
+                + "the download finishes. If nothing happens, open OneDrive (or iCloud Drive) and choose Always Keep on This Device."
+            return true
+        }
+        // Anything besides LaTeX (R Markdown, a PDF, a project folder, code): read as text, as a GitHub
+        // repository is, the write-up first.
+        if purpose != "viva" || urls.contains(where: { !["tex", "zip"].contains($0.pathExtension.lowercased()) }) {
             Task { await openProject(urls, adding: adding, purpose: purpose) }
             return true
         }
@@ -483,7 +530,10 @@ final class VARModel: ObservableObject {
                   let latex = kind == "zip" ? Self.latex(inZip: url) : try? String(contentsOf: url, encoding: .utf8) else { return nil }
             return ["name": url.deletingPathExtension().lastPathComponent, "latex": latex]
         }
-        guard let first = added.first else { return false }
+        guard let first = added.first else {
+            notice = "Couldn't read any LaTeX from \(urls.map(\.lastPathComponent).joined(separator: ", "))."
+            return false
+        }
         let name = adding && !document.isEmpty ? document : (first["name"] ?? "Write-up") + ".tex"
         Task {
             _ = await API.post("var/files", ["document": name, "add": added, "project": project])
@@ -505,8 +555,15 @@ final class VARModel: ObservableObject {
                 added.append(["name": shown, "latex": "=== \(shown) ===\n" + text])
             }
         }
-        guard !added.isEmpty else { return }
-        if side != "professional" { side = "professional" }
+        guard !added.isEmpty else {
+            notice = "Couldn't read any text from \(urls.map(\.lastPathComponent).joined(separator: ", ")). VAR reads LaTeX, R Markdown, Quarto, Markdown, PDFs, Word documents, code and notebooks."
+            return
+        }
+        if purpose != "viva" && side != "professional" { side = "professional" }
+        // A write-up before the code it reports on, as for a GitHub repository.
+        let writeUp = { (f: [String: String]) in
+            (f["latex"] ?? "").contains("\\documentclass") || [".tex", ".rmd", ".qmd", ".pdf", ".docx"].contains { (f["name"] ?? "").lowercased().hasSuffix($0) } }
+        if purpose == "viva" { added.sort { writeUp($0) && !writeUp($1) } }
         let name = adding && !document.isEmpty ? document : (urls.first?.deletingPathExtension().lastPathComponent ?? "Project")
         _ = await API.post("var/files", ["document": name, "add": added, "project": project, "purpose": purpose], timeout: 15)
         document = name
@@ -595,6 +652,22 @@ struct VARView: View {
     @State private var scheme = false
     @State private var deleting = false
 
+    /// What can be practised on: a document Referee has read in an editor, or a file or folder.
+    @ViewBuilder private func addChoices(_ purpose: String) -> some View {
+        if !model.writing.isEmpty {
+            SwiftUI.Section("From your writing") {
+                ForEach(Array(model.writing.prefix(12).enumerated()), id: \.offset) { _, doc in
+                    let editor = doc["editor"] as? String ?? ""
+                    Button((doc["title"] as? String ?? "") + (editor.isEmpty ? "" : " · \(editor)")) {
+                        model.fromWriting(doc["document"] as? String ?? "", purpose: purpose)
+                    }
+                }
+            }
+            Divider()
+        }
+        Button("Choose a file or folder") { model.chooseFile(purpose: purpose) }
+    }
+
     var body: some View {
         GeometryReader { space in
             HStack(spacing: 0) {
@@ -613,7 +686,7 @@ struct VARView: View {
                               action: ("Add a project for an interview", { model.chooseFile(purpose: "interview") }))
                 } else if model.document.isEmpty {
                     EmptyPage(symbol: "tv", title: "Nothing to practise yet",
-                              message: "Open your write-up in Overleaf with the Referee panel showing, or choose or drop in .tex files or the .zip from Overleaf’s Download as source. Its concepts and arguments, and topics around them, become questions to learn from, saved for next time.",
+                              message: "Choose or drop in your write-up (LaTeX or Overleaf’s .zip, Word, PDF, R Markdown, Quarto) or its project’s folder, or pick from ＋ a document Referee has read in Overleaf, Google Docs or Word. Its concepts and arguments, and topics around them, become questions to learn from, saved for next time.",
                               action: ("Choose a file", { model.chooseFile() }))
                 } else if model.state == "building" {
                     EmptyPage(symbol: "tv", title: "Writing your questions",
@@ -630,7 +703,11 @@ struct VARView: View {
                 }
             }
         }
+        .task { await model.loadWriting() }
         .dropDestination(for: URL.self) { urls, _ in model.open(urls, adding: false) }
+        .alert(model.notice ?? "", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) {
+            Button("OK") { model.notice = nil }
+        }
         .onAppear { model.load() }
         .onChange(of: model.filter) { _, _ in Task { await model.reload() } }
         .onChange(of: model.document) { _, _ in model.selected = nil; Task { await model.loadItems() } }
@@ -643,15 +720,15 @@ struct VARView: View {
             .pickerStyle(.segmented).labelsHidden().fixedSize()
             if model.professional {
                 Menu {
-                    Button("Job interview") { model.chooseFile(purpose: "interview") }
-                    Button("Presentation or Q&A") { model.chooseFile(purpose: "briefing") }
+                    Menu("Job interview") { addChoices("interview") }
+                    Menu("Presentation or Q&A") { addChoices("briefing") }
                 } label: { HeaderIcon("doc.badge.plus") }
-                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().menuOrder(.fixed)
                     .help("Practise for a job interview or a presentation")
             } else {
-                Button { model.chooseFile(purpose: "viva") } label: { HeaderIcon("doc.badge.plus") }
-                    .buttonStyle(.borderless)
-                    .help("Practise on .tex files or an Overleaf source .zip")
+                Menu { addChoices("viva") } label: { HeaderIcon("doc.badge.plus") }
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().menuOrder(.fixed)
+                    .help("Practise on your write-up")
             }
         }
     }
@@ -2098,6 +2175,7 @@ struct GitHubRepositories: View {
                          : "Professional").font(Scaled.style(11, .regular))
                 }
                 .menuStyle(.button).buttonStyle(.plain).foregroundStyle(.secondary).fixedSize()
+                .menuOrder(.fixed)
             }
         }
         .padding(.vertical, 3)

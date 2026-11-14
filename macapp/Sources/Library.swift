@@ -14,6 +14,8 @@ final class LibraryModel: ObservableObject {
     @Published var current = ""
     @Published var links: [String: [String]] = [:]
     @Published var archived: [String] = []
+    /// How every list of projects is ordered: "created" or "name" (the server sends them in that order).
+    @Published var projectOrder = "created"
     @Published var references: [String] = []
     @Published var filter = "all"            // "all", "none" or a project name
     @Published var document = ""              // References for one document ("" for all of them)
@@ -30,6 +32,7 @@ final class LibraryModel: ObservableObject {
             notes = found.mapValues { ($0 as? [[String: Any]] ?? []).compactMap { $0["text"] as? String } }
             if let settings = await API.get("settings") {
                 projects = settings["projects"] as? [String] ?? []
+                projectOrder = settings["project_order"] as? String ?? "created"
                 current = settings["project"] as? String ?? ""
                 links = settings["links"] as? [String: [String]] ?? [:]
                 archived = settings["archived"] as? [String] ?? []
@@ -100,6 +103,11 @@ final class LibraryModel: ObservableObject {
     }
 
     // Actions, each followed by a reload.
+    func setProjectOrder(_ order: String) {
+        projectOrder = order
+        Task { _ = await API.post("settings", ["project_order": order]); load() }
+    }
+
     func setCurrent(_ name: String) { Task { _ = await API.post("settings", ["project": name]); load() } }
     func rename(_ old: String, to new: String) { Task { _ = await API.post("projects/rename", ["old": old, "new": new]); if filter == old { filter = new.isEmpty ? "all" : new }; load() } }
     func archive(_ name: String, _ archived: Bool) { Task { _ = await API.post("projects/archive", ["project": name, "archived": archived]); load() } }
@@ -473,6 +481,7 @@ struct LibraryView: View {
                     Button("No Project") { library.move(url, to: "") }
                     ForEach(library.projects, id: \.self) { name in Button(name) { library.move(url, to: name) } }
                 }
+                .menuOrder(.fixed)
                 Button("Rename") { renamingSource = url; sourceName = title(source) }
                 Button("Citation Details") {
                     detailing = url
@@ -639,20 +648,62 @@ struct ProjectPopover: View {
     }
 
     @State private var showArchived = false
+    @State private var showActions = false
+    @State private var showOrder = false
+    @State private var search = ""
+
+    /// As loaded here (so a new sort shows at once), or as passed in until then.
+    private var all: [String] { library.projects.isEmpty ? projects : library.projects }
+    private var found: [String] {
+        let wanted = search.trimmingCharacters(in: .whitespaces)
+        return wanted.isEmpty ? all : all.filter { $0.localizedCaseInsensitiveContains(wanted) }
+    }
 
     private var list: some View {
         Group {
-            ForEach([""] + projects, id: \.self) { project in
-                row(project.isEmpty ? "No project" : project, check: project == current) { choose(project); close() }
+            // Search, once there are more than 8 projects.
+            if all.count > 8 {
+                TextField("Search projects", text: $search).textFieldStyle(.roundedBorder)
+                    .padding(.horizontal, 6).padding(.bottom, 4)
             }
+            // Eight at a time, scrolling after that, so the menu never outgrows the screen.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    if search.isEmpty { row("No project", check: current.isEmpty) { choose(""); close() } }
+                    ForEach(found, id: \.self) { project in
+                        row(project, check: project == current) { choose(project); close() }
+                    }
+                    if found.isEmpty {
+                        Text("No project matches").foregroundStyle(.secondary).padding(.horizontal, 34).padding(.vertical, 5)
+                    }
+                }
+            }
+            .frame(maxHeight: Scaled.s(27) * 9)
+            .fixedSize(horizontal: false, vertical: found.count < 9)
             Divider().padding(.vertical, 4)
-            row("New Project") { name = ""; step = .new }
+            row("New Project") { name = search; step = .new }
             if !current.isEmpty {
-                row("Due Date") { close(); setDue() }
-                if projects.count > 1 { row("Also Cite From") { step = .citeFrom } }
-                row("Rename") { name = current; step = .rename }
-                row("Archive Project") { library.archive(current, true); close() }
-                row("Delete Project", destructive: true) { deleting = true }
+                // The current project's own actions, folded into one row.
+                fold("Project options", open: $showActions)
+                if showActions {
+                    Group {
+                        row("Due Date") { close(); setDue() }
+                        if all.count > 1 { row("Also Cite From") { step = .citeFrom } }
+                        row("Rename") { name = current; step = .rename }
+                        row("Archive Project") { library.archive(current, true); close() }
+                        row("Delete Project", destructive: true) { deleting = true }
+                    }
+                    .padding(.leading, 14)
+                }
+            }
+            // How projects are listed here and in every other list of them.
+            fold("Sort projects", open: $showOrder)
+            if showOrder {
+                Group {
+                    row("By name", check: library.projectOrder == "name") { library.setProjectOrder("name") }
+                    row("By date created", check: library.projectOrder != "name") { library.setProjectOrder("created") }
+                }
+                .padding(.leading, 14)
             }
             if !library.archived.isEmpty {
                 Divider().padding(.vertical, 4)
@@ -676,6 +727,21 @@ struct ProjectPopover: View {
         }
     }
 
+    /// A row that opens and closes the rows under it, its chevron turning.
+    private func fold(_ title: String, open: Binding<Bool>) -> some View {
+        Button { open.wrappedValue.toggle() } label: {
+            HStack(spacing: 8) {
+                Color.clear.frame(width: 14, height: 1)
+                Text(title)
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: Scaled.s(10), weight: .semibold))
+                    .foregroundStyle(.secondary).rotationEffect(.degrees(open.wrappedValue ? 90 : 0))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func row(_ title: String, check: Bool? = nil, destructive: Bool = false, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack {
@@ -683,7 +749,7 @@ struct ProjectPopover: View {
                 // the text lines up beside it.
                 Image(systemName: "checkmark").font(.system(size: Scaled.s(11), weight: .semibold))
                     .opacity(check == true ? 1 : 0).frame(width: 14)
-                Text(title).foregroundStyle(destructive ? Color.red : Color.primary)
+                Text(title).foregroundStyle(destructive ? Color.red : Color.primary).lineLimit(1).fixedSize()
                 Spacer()
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
@@ -712,7 +778,7 @@ struct ProjectPopover: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("\(current) can also cite references from:")
                 .font(Scaled.style(12, .regular)).foregroundStyle(.secondary)
-            ForEach(projects.filter { $0 != current }, id: \.self) { other in
+            ForEach((library.projects.isEmpty ? projects : library.projects).filter { $0 != current }, id: \.self) { other in
                 Toggle(other, isOn: Binding(
                     get: { library.links[current]?.contains(other) ?? false },
                     set: { on in

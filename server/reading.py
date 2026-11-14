@@ -28,11 +28,23 @@ class ReadingSettings:
         self.links: Dict[str, List[str]] = data.get("links", {})
         # Archived projects: out of every menu, with everything in them kept.
         self.archived: List[str] = data.get("archived", [])
+        # How every list of projects is ordered: "created" (as kept) or "name".
+        self.project_order: str = data.get("project_order", "created")
 
     def as_dict(self) -> Dict:
 
         return {"project": self.project, "projects": self.projects, "keep_minutes": self.keep_minutes, "links": self.links,
-                "archived": self.archived}
+                "archived": self.archived, "project_order": self.project_order}
+
+    def shown(self) -> Dict:
+
+        """
+        As every app shows it: the projects (and archived ones) in the chosen order. They're kept in
+        the order they were created, so switching back to that order always works.
+        """
+
+        order = (lambda names: sorted(names, key=str.lower)) if self.project_order == "name" else list
+        return {**self.as_dict(), "projects": order(self.projects), "archived": order(self.archived)}
 
     def archive(self, name: str, archived: bool) -> Dict:
 
@@ -49,7 +61,7 @@ class ReadingSettings:
             self.archived = [p for p in self.archived if p != name]
             self.projects = list(dict.fromkeys(self.projects + [name]))
         self.path.write_text(json.dumps(self.as_dict()), encoding="utf-8")
-        return self.as_dict()
+        return self.shown()
 
     def rename(self, old: str, new: str) -> Dict:
 
@@ -69,7 +81,7 @@ class ReadingSettings:
                 links[name] = [new if o == old else o for o in others if new or o != old]
         self.links = links
         self.path.write_text(json.dumps(self.as_dict()), encoding="utf-8")
-        return self.as_dict()
+        return self.shown()
 
     def allowed(self, project: str):
 
@@ -90,10 +102,14 @@ class ReadingSettings:
                 self.projects.append(self.project)
             self.archived = [p for p in self.archived if p != self.project]   # choosing one brings it back
         if "projects" in changes:
-            self.projects = [p for p in changes["projects"] if p]
+            # Kept in the order they were created, whatever order they're sent in; new ones at the end.
+            given = [p for p in changes["projects"] if p]
+            self.projects = [p for p in self.projects if p in given] + [p for p in given if p not in self.projects]
+        if changes.get("project_order") in ("created", "name"):
+            self.project_order = changes["project_order"]
         if "links" in changes:
             self.links = {p: [o for o in others if o != p] for p, others in changes["links"].items()}
         if changes.get("keep_minutes"):
             self.keep_minutes = int(changes["keep_minutes"])
         self.path.write_text(json.dumps(self.as_dict()), encoding="utf-8")
-        return self.as_dict()
+        return self.shown()

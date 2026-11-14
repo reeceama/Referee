@@ -23,13 +23,25 @@ OPINION = re.compile(
     re.IGNORECASE)
 
 
+# Not prose at all: pieces of links or LaTeX, left when a sentence is split at a link's full stop
+# ("com/blog/184}{Mendeley}"), and instructions for using software ("click the Review menu"), as in
+# a template's sample text.
+RESIDUE = re.compile(r"\}\{|\\verb|https?://|www\.|^\W*[a-z0-9-]+\.?[a-z]*/\S|^\W*(com|org|net|edu|io|ac|uk|gov)/", re.IGNORECASE)
+INTERFACE = re.compile(r"\b(click|clicking|menu|toolbar|button)\b", re.IGNORECASE)
+LINK = re.compile(r"\S*(?:/|\\url|\\href)\S*")
+
+
 def needs_source(sentence: str) -> bool:
 
     """
-    True if the sentence reads like a factual claim rather than opinion or signposting.
+    True if the sentence reads like a factual claim rather than opinion, signposting, pieces of
+    links or LaTeX, or instructions for using software.
     """
 
     if OPINION.search(sentence) or sentence.rstrip().endswith("?"):
         return False
+    if RESIDUE.search(sentence) or INTERFACE.search(sentence):
+        return False
+    sentence = LINK.sub(" ", sentence)   # numbers inside links aren't figures
     signals = sum(bool(pattern.search(sentence)) for pattern in (FIGURES, RESEARCH, CAUSAL))
     return signals >= 1
