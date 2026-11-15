@@ -2,6 +2,13 @@
 
 What changed in each release of Referee, newest first. Releases are numbered (`v1.0.0`), and downloaded copies of Referee for Mac update themselves to the latest one.
 
+## 1.1.2 (15 November 2026, `v1.1.2`)
+
+- **GitHub in Settings lists only the repositories VAR reads**, so it stays short however many you have. **Add a repository** searches the rest, recently updated first. Each shows when it was last updated, and they update by themselves once a day.
+- **The browser extension looks like the Mac app**: serif project titles, small capital section labels, and outlined controls in the popup and the Library page, with fewer greys and brighter secondary text, so it's easier to read, in dark mode most of all. The Overleaf and Google Docs panels are easier to read in dark mode too, and project menus show the whole project name.
+- **The browser extension shows what Referee knows**: the Library page has **Library** and **Evidence**, as the Mac app does, with each document's claims, what backs each one (source, statement and page) and what needs a look, and **Move to project** for a document. The popup leads with the project's next due date, the page you're on (whether it's in your reading, and how many of your claims it backs), and the latest claims that need a look; its settings fold under **Settings**.
+- The popup's project menu says "New project", without "…".
+
 ## 1.1.1 (14 November 2026, `v1.1.1`)
 
 - **Sign in instead of a key**: with no key saved, Referee uses a sign-in from Anthropic's `ant` command-line tool, which renews itself. Settings shows which is in use.

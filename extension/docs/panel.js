@@ -127,7 +127,7 @@
     .good { border-color: #34c759; } .warn { border-color: #ff9f0a; } .bad { border-color: #ff3b30; }
     button, a { font: inherit; font-size: 12px; margin-left: 4px; }
     code { font-size: 12px; background: #f2f2f7; padding: 1px 4px; border-radius: 4px; }
-    @media (prefers-color-scheme: dark) { .box { background: #2c2c2e; color: #f5f5f7; } .item { border-color: #3a3a3c; } code { background: #3a3a3c; } a { color: #64d2ff; } }
+    @media (prefers-color-scheme: dark) { .box { background: #1e1e1e; color: #f5f5f7; box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 4px 20px rgba(0,0,0,.4); } .item { border-color: rgba(255,255,255,.08); } .sentence, .quote, .hint, h3 { color: #aeaeb2; } code { background: rgba(255,255,255,.1); } a { color: #64d2ff; } }
   </style><div class="box closed"><header><span>Referee</span><span class="count"></span></header><div class="list"></div></div>`;
   document.documentElement.append(host);
   const box = shadow.querySelector(".box");

@@ -2250,6 +2250,11 @@ def github_sync():
     return github_repos.sync()
 
 
+@app.on_event("startup")
+def github_watch():
+    github_repos.watch()
+
+
 @app.post("/var/context")
 def var_set_context(body: dict):
     # {"document", "purpose"?, "context"?}: what a set is for, and the job description or audience.

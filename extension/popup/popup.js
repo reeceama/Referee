@@ -135,6 +135,65 @@ async function showSaved() {
   savedEmpty.textContent = project ? `Nothing in ${project} yet.` : "Nothing saved yet.";
   savedEmpty.hidden = sources.length > 0;
   showSaveButton(sources);
+  showThisPage(sources, Array.isArray(claims) ? claims : []);
+  showFlags(project, Array.isArray(claims) ? claims : []);
+}
+
+// The page you're on: whether it's in your reading, and how many of your claims it backs.
+async function showThisPage(sources, claims) {
+  const tab = await currentTab();
+  // Only a web page or a PDF can be read or saved: not a new tab or the browser's own pages.
+  document.getElementById("this-page").hidden = !/^(https?|file):/.test(tab?.url || "");
+  document.getElementById("page-title").textContent = tab?.title || "";
+  const stored = sources.find((c) => c.url === tab?.url);
+  const backs = claims.filter((c) => c.label === "supports" && c.source?.url === tab?.url).length;
+  document.getElementById("page-info").textContent = !stored ? "Not in your reading."
+    : backs ? `Backs ${backs} of your claim${backs === 1 ? "" : "s"}.`
+    : stored.kept === false ? "Read, not saved: forgotten unless you save it." : "Saved. Backs none of your claims yet.";
+}
+
+// What Evidence has flagged in this project: contradicted, misquoted, stated too strongly, or needing a source.
+function showFlags(project, claims) {
+  const mine = claims.filter((c) => !project || (c.project || "") === project);
+  const why = (c) => c.label === "contradicts" ? ["bad", "Your source says otherwise"]
+    : c.label === "misquote" || c.misquote ? ["bad", "The quotation doesn't match the source"]
+    : c.overstated ? ["", "Stated more strongly than the source"]
+    : c.label === "needs_source" ? ["", "Needs a source"] : null;
+  const flagged = mine.map((c) => [c, why(c)]).filter(([, w]) => w).reverse();   // newest first
+  document.getElementById("flags-box").hidden = !flagged.length;
+  document.getElementById("flags").replaceChildren(...flagged.slice(0, 3).map(([c, [kind, reason]]) => {
+    const item = document.createElement("li");
+    item.className = kind;
+    const sentence = c.sentence.length > 90 ? c.sentence.slice(0, 88).replace(/\s+\S*$/, "") + " …" : c.sentence;
+    item.textContent = `“${sentence}”`;
+    const detail = document.createElement("span");
+    detail.className = "why";
+    detail.textContent = reason;
+    item.append(detail);
+    return item;
+  }));
+  const more = flagged.length - 3;
+  document.getElementById("open-evidence").textContent = more > 0 ? `Open Evidence · ${more} more` : "Open Evidence";
+}
+
+document.getElementById("open-evidence").addEventListener("click", (event) => {
+  event.preventDefault();
+  chrome.tabs.create({ url: chrome.runtime.getURL("library/library.html#evidence") });
+  window.close();
+});
+
+// The project's due date, or its next deadline if that comes first.
+async function showDue() {
+  const box = document.getElementById("due");
+  const dues = await chrome.runtime.sendMessage({ type: "get", path: "projects/due" }).catch(() => null);
+  const due = dues && !dues.error ? dues[settings.project] : null;
+  const today = new Date(new Date().toDateString());
+  const dates = due ? [[due.date, "Due", due.submitted], ...(due.deadlines || []).map((d) => [d.date, d.name || "Deadline", d.submitted])] : [];
+  const next = dates.filter(([day, , done]) => day && !done && new Date(day) >= today).sort((a, b) => a[0].localeCompare(b[0]))[0];
+  if (!next) { box.textContent = "Checks your writing against what you've read."; return; }
+  const days = Math.round((new Date(next[0]) - today) / 86400000);
+  const date = new Date(next[0]).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+  box.textContent = `${next[1]} ${date} · ${days === 0 ? "today" : days === 1 ? "tomorrow" : `${days} days`}`;
 }
 
 searchBox.addEventListener("input", showSaved);
@@ -146,7 +205,7 @@ async function showProject() {
   projectSelect.replaceChildren(
     new Option("No project", ""),
     ...settings.projects.map((name) => new Option(name, name)),
-    new Option("New project…", NEW_PROJECT));
+    new Option("New project", NEW_PROJECT));
   projectSelect.value = settings.project;
   keepSelect.value = String(settings.keep_minutes);
 }
@@ -156,6 +215,7 @@ async function saveSettings(changes) {
   if (saved && !saved.error) settings = saved;
   showProject();
   showSaved();
+  showDue();
 }
 
 // Chrome doesn't show prompt() in extension popups, so new projects are named in the popup.
@@ -198,7 +258,7 @@ async function showSaveButton(sources) {
   const stored = sources.find((c) => c.url === tab?.url);
   const saved = stored && stored.kept !== false;
   saveButton.disabled = Boolean(saved);
-  saveButton.textContent = saved ? "Saved for later ✓" : "Save this page for later";
+  saveButton.textContent = saved ? "Saved" : "Save";
 }
 
 saveButton.addEventListener("click", async () => {
@@ -264,7 +324,8 @@ mode.addEventListener("change", () => {
   showModeHint();
 });
 
-document.getElementById("open-library").addEventListener("click", () => {
+document.getElementById("open-library").addEventListener("click", (event) => {
+  event.preventDefault();
   chrome.tabs.create({ url: chrome.runtime.getURL("library/library.html") });
   window.close();
 });
@@ -296,7 +357,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 setInterval(showSaved, 30000);  // keep "min left" current while the popup is open
 
 showStatus().then(showModeHint);
-showProject().then(showSaved);
+showProject().then(() => { showSaved(); showDue(); });
 showServer();
 
 

@@ -7,41 +7,54 @@
          rather than boxes, and blue for what you can do. Light and dark follow the system. */
       :root {
         color-scheme: light dark;
-        --text: #1d1d1f; --muted: #6e6e73; --faint: #aeaeb2; --line: rgba(0,0,0,.1); --field: rgba(0,0,0,.05);
+        --text: #1d1d1f; --muted: #5e5e63; --faint: #8e8e93; --line: rgba(0,0,0,.1); --field: transparent; --outline: rgba(0,0,0,.16);
         --page: #ffffff; --bar: #ececec; --accent: #007aff; --good: #248a3d; --warn: #c93400; --bad: #d70015;
       }
       @media (prefers-color-scheme: dark) {
-        :root { --text: #f5f5f7; --muted: #98989d; --faint: #636366; --line: rgba(255,255,255,.1); --field: rgba(255,255,255,.07);
-                --page: #212223; --bar: #2c2c2e; --accent: #0a84ff; --good: #30d158; --warn: #ff9f0a; --bad: #ff453a; }
+        :root { --text: #f5f5f7; --muted: #aeaeb2; --faint: #8e8e93; --line: rgba(255,255,255,.08); --field: transparent; --outline: rgba(255,255,255,.18);
+                --page: #1e1e1e; --bar: #1e1e1e; --accent: #0a84ff; --good: #30d158; --warn: #ff9f0a; --bad: #ff453a; }
       }
       /* Laid out like Referee for Mac: a header bar on top, then the content below it. */
       body { font: 13px -apple-system, "Segoe UI", sans-serif; width: 340px; margin: 0; color: var(--text); background: var(--page); }
-      header { display: flex; justify-content: space-between; align-items: center; height: 46px; padding: 0 16px;
-               background: var(--bar); border-bottom: 1px solid var(--line); }
+      header { display: flex; justify-content: space-between; align-items: center; height: 40px; padding: 0 18px; }
       .brand { display: flex; align-items: center; gap: 8px; }
       .brand img { width: 20px; height: 20px; border-radius: 5px; }
-      h1 { font-size: 14px; font-weight: 700; margin: 0; }
-      .content { padding: 12px 18px 16px; }
-      .project-title { font: 700 18px "New York", "Iowan Old Style", Georgia, serif; margin: 2px 0 2px; }
+      h1 { font-size: 12px; font-weight: 500; margin: 0; color: var(--muted); }
+      .content { padding: 0 18px 16px; }
+      .project-title { font: 400 22px "New York", "Iowan Old Style", Georgia, serif; margin: 2px 0 2px; }
       .server { font-size: 11px; color: var(--muted); }
       .server[data-state="online"] { color: var(--good); }
       .server[data-state="offline"] { color: var(--bad); }
-      .tagline { font-size: 12px; color: var(--muted); margin: 0 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+      .tagline { font-size: 12px; color: var(--muted); margin: 0 0 4px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
       .row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
-      select, input { font: inherit; color: var(--text); background: var(--field); border: 0; border-radius: 6px; padding: 4px 8px; }
-      #project { max-width: 160px; }
-      #status { font-size: 12px; margin: 10px 0; min-height: 16px; }
+      select, input { font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--outline); border-radius: 6px; padding: 4px 8px; }
+      #project { max-width: 220px; }
+      .project-row { margin-top: 14px; border-top: 1px solid var(--line); }
+      .page-title { font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #page-info { margin: 2px 0 8px; }
+      #status { font-size: 12px; margin: -4px 0 4px; min-height: 0; }
+      #flags { list-style: none; margin: 4px 0 6px; padding: 0; }
+      #flags li { font-size: 12px; padding: 4px 0 4px 8px; margin-top: 4px; border-left: 3px solid var(--warn); }
+      #flags li.bad { border-color: var(--bad); }
+      #flags .why { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
+      .link { font-size: 12px; color: var(--accent); text-decoration: none; }
+      details summary { cursor: pointer; padding: 8px 0; border-bottom: 1px solid var(--line); list-style: none; display: flex; justify-content: space-between; }
+      details summary::after { content: "›"; color: var(--muted); }
+      details[open] summary::after { transform: rotate(90deg); }
       #status.off { color: var(--muted); }
-      button { width: 100%; padding: 8px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: 500 13px -apple-system, sans-serif; cursor: pointer; }
-      button.quiet { margin-top: 6px; background: none; color: var(--muted); font-size: 12px; font-weight: 400; }
+      /* Soft grey buttons, as in the Mac app, rather than solid blue ones. */
+      button { width: 100%; padding: 8px; border: 1px solid var(--outline); border-radius: 8px; background: var(--field); color: var(--text); font: 400 13px -apple-system, sans-serif; cursor: pointer; }
+      button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+      button.quiet { margin-top: 6px; background: none; border: 0; color: var(--muted); font-size: 12px; font-weight: 400; }
       button.quiet[data-armed="yes"] { color: var(--bad); }
       .switch { position: relative; width: 34px; height: 20px; }
       .switch input { display: none; }
-      .slider { position: absolute; inset: 0; background: var(--field); border-radius: 20px; cursor: pointer; transition: .2s; }
+      .slider { position: absolute; inset: 0; background: var(--outline); border-radius: 20px; cursor: pointer; transition: .2s; }
       .slider::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; background: #fff; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: .2s; }
       input:checked + .slider { background: var(--accent); }
       input:checked + .slider::before { transform: translateX(14px); }
-      h2 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
+      h2 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 4px; }
+      h2.first { margin-top: 14px; }
       #saved-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: 200px; overflow-y: auto; }
       #saved-list li { position: relative; padding: 8px 76px 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
       #saved-list .t { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 14px "New York", "Iowan Old Style", Georgia, serif; }
@@ -52,7 +65,7 @@
       #saved-list .s[data-status="offline"], #saved-list .s[data-status="skipped"] { color: var(--bad); }
       /* Save and forget sit well apart, with large targets, so one isn't pressed for the other. */
       #saved-list .actions { position: absolute; right: 0; top: 6px; display: flex; gap: 18px; }
-      #saved-list .actions button { width: 26px; height: 26px; padding: 0; border-radius: 6px; background: none; color: var(--faint); display: flex; align-items: center; justify-content: center; font-variant-emoji: text; }
+      #saved-list .actions button { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--faint); display: flex; align-items: center; justify-content: center; font-variant-emoji: text; }
       #saved-list .keep-one:hover { color: var(--good); }
       #saved-list .forget-one:hover { color: var(--bad); }
       #saved-list .forget-one[data-armed="yes"] { color: #fff; background: var(--bad); }
@@ -64,11 +77,41 @@
       #save-result { margin: 2px 0 10px; min-height: 0; }
       #search { width: 100%; box-sizing: border-box; margin-bottom: 4px; padding: 6px 8px; }
       .tags { display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
-      .tag { font-size: 10px; padding: 1px 6px; border-radius: 5px; background: var(--field); color: var(--muted); }
+      .tag { font-size: 10px; padding: 1px 6px; border-radius: 5px; background: none; color: var(--muted); }
+      .tag:not(.cited):not(.temp) { padding-left: 0; }
       .tag.cited { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
       .tag.temp { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
       .hint { font-size: 11px; color: var(--muted); margin: 8px 0 10px; line-height: 1.45; }
       .empty { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+      /* One system throughout: sections divided by a single line, the same spacing above and below
+         each, a small capital label first; rows inside a section divided by lines only between them. */
+      section { padding: 12px 0; border-top: 1px solid var(--line); }
+      section.top { border-top: 0; padding-top: 0; }
+      section h2, h2.first { margin: 0 0 6px; }
+      .sub { font-size: 12px; color: var(--muted); margin: 2px 0 0; line-height: 1.4; }
+      .sub:empty { display: none; }
+      #status { margin: 2px 0 0; }
+      #status:not(.off) { color: var(--good); }
+      .page-row { display: flex; align-items: center; gap: 12px; }
+      .page-what { flex: 1; min-width: 0; }
+      .page-title { margin: 0; }
+      button.small { width: auto; padding: 4px 12px; font-size: 12px; border-radius: 6px; flex-shrink: 0; }
+      #save-later:disabled { color: var(--good); border-color: transparent; cursor: default; }
+      #save-result { margin-top: 6px; }
+      #flags { margin: 0 0 8px; }
+      #flags li:first-child { margin-top: 0; }
+      #saved-list { margin: 4px 0 0; }
+      #saved-list li:last-child { border-bottom: 0; }
+      #saved-empty { margin: 6px 0 0; }
+      .links { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+      .links button.quiet { width: auto; margin: 0; padding: 0; font-size: 12px; }
+      section.settings { padding: 0; }
+      .settings .row { border-bottom: 1px solid var(--line); padding: 9px 0; }
+      .project-row { margin-top: 0; border-top: 0; }
+      details summary { border-bottom: 0; padding: 9px 0; }
+      details[open] summary { border-bottom: 1px solid var(--line); }
+      details .row:last-of-type { border-bottom: 0; }
+      .content { padding-bottom: 6px; }
     </style>
   </head>
   <body>
@@ -77,56 +120,82 @@
       <span class="server" id="server" data-state="checking">Checking server…</span>
     </header>
     <div class="content">
-    <div class="project-title" id="project-title"></div>
-    <p class="tagline">Checks your writing against what you've read.</p>
+    <section class="top">
+      <div class="project-title" id="project-title"></div>
+      <div class="sub" id="due">Checks your writing against what you've read.</div>
+      <div class="sub" id="status"></div>
+    </section>
 
-    <div class="row">
-      <span>Research mode</span>
-      <label class="switch"><input type="checkbox" id="research" /><span class="slider"></span></label>
-    </div>
-    <div class="row">
-      <span>Turn off after</span>
-      <select id="duration">
-        <option value="60">1 hour</option>
-        <option value="180">3 hours</option>
-        <option value="0">Never</option>
-      </select>
-    </div>
-    <div class="row">
-      <span>Start automatically</span>
-      <select id="mode">
-        <option value="auto">While I'm writing</option>
-        <option value="manual">Manually only</option>
-      </select>
-    </div>
-    <div class="row">
+    <section id="this-page">
+      <h2>This page</h2>
+      <div class="page-row">
+        <div class="page-what">
+          <div class="page-title" id="page-title"></div>
+          <div class="sub" id="page-info"></div>
+        </div>
+        <button id="save-later" class="small">Save</button>
+      </div>
+      <p class="sub" id="save-result"></p>
+    </section>
+
+    <section id="flags-box" hidden>
+      <h2>Needs a look</h2>
+      <ul id="flags"></ul>
+      <a href="#" class="link" id="open-evidence">Open Evidence</a>
+    </section>
+
+    <section>
+      <h2 id="saved-title">Your reading</h2>
+      <input id="search" type="search" placeholder="Search your reading" />
+      <ol id="saved-list"></ol>
+      <p class="sub" id="saved-empty">Pages you read during a Focus or while writing appear here. Save the ones you'll use.</p>
+      <div class="links">
+        <a href="#" class="link" id="open-library">Open library</a>
+        <button class="quiet" id="forget">Forget temporary pages</button>
+      </div>
+    </section>
+
+    <section class="settings">
+    <div class="row project-row">
       <span>Project</span>
       <select id="project"></select>
     </div>
     <div class="row new-project" id="new-project" hidden>
       <input id="new-project-name" placeholder="Project name" maxlength="60" />
-      <button id="new-project-create">Create</button>
+      <button id="new-project-create" class="small">Create</button>
     </div>
-    <div class="row">
-      <span>Keep unsaved reading for</span>
-      <select id="keep">
-        <option value="15">15 minutes</option>
-        <option value="60">1 hour</option>
-        <option value="1440">1 day</option>
-      </select>
-    </div>
-    <p class="hint" id="mode-hint">Captures what you read only during a Focus or while you're writing. Reading you don't save or cite is forgotten after the time above.</p>
-    <div id="status"></div>
-    <button id="save-later">Save this page for later</button>
-    <p class="hint" id="save-result"></p>
-
-    <h2 id="saved-title">Your reading</h2>
-    <input id="search" type="search" placeholder="Search your reading" />
-    <ol id="saved-list"></ol>
-    <p class="empty" id="saved-empty">Pages you read during a Focus or while writing appear here. Save the ones you'll use.</p>
-
-    <button id="open-library">Open library</button>
-    <button class="quiet" id="forget">Forget temporary pages</button>
+    <details id="settings">
+      <summary>Settings</summary>
+      <div class="row">
+        <span>Research mode</span>
+        <label class="switch"><input type="checkbox" id="research" /><span class="slider"></span></label>
+      </div>
+      <div class="row">
+        <span>Turn off after</span>
+        <select id="duration">
+          <option value="60">1 hour</option>
+          <option value="180">3 hours</option>
+          <option value="0">Never</option>
+        </select>
+      </div>
+      <div class="row">
+        <span>Start automatically</span>
+        <select id="mode">
+          <option value="auto">While I'm writing</option>
+          <option value="manual">Manually only</option>
+        </select>
+      </div>
+      <div class="row">
+        <span>Keep unsaved reading for</span>
+        <select id="keep">
+          <option value="15">15 minutes</option>
+          <option value="60">1 hour</option>
+          <option value="1440">1 day</option>
+        </select>
+      </div>
+      <p class="hint" id="mode-hint">Captures what you read only during a Focus or while you're writing. Reading you don't save or cite is forgotten after the time above.</p>
+    </details>
+    </section>
     </div>
     <script src="popup.js"></script>
   </body>

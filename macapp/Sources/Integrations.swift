@@ -89,7 +89,7 @@ struct IntegrationsView: View {
                 }
             }
 
-            section("GitHub", footer: "VAR can practise on the repositories you tick: on the Academic side, your write-up (.tex, R Markdown or Quarto) with its code; on the Professional side, the README, code and notebooks. Referee uses the GitHub CLI signed in on this Mac, so it never sees your token, and only reads what you tick.") {
+            section("GitHub", footer: "VAR practises on the repositories you add: on the Academic side, your write-up (.tex, R Markdown or Quarto) with its code; on the Professional side, the README, code and notebooks. Each is copied to this Mac read-only and updated once a day. Referee uses the GitHub CLI signed in on this Mac, so it never sees your token, and only reads what you add.") {
                 GitHubRepositories()
             }
             section("Meetings", footer: "In Meetings, the calendar button lists your events from two days ago to a week ahead, from the calendars on this Mac, including Google Calendar: add your Google account in System Settings → Internet Accounts, with Calendars switched on. Referee only reads them. Choosing one starts its notes with the title, date and attendees.") {

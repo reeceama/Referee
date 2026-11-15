@@ -3,17 +3,19 @@
    blue accent. Light and dark follow the system. */
 :root {
   color-scheme: light dark;
-  --text: #1d1d1f; --muted: #6e6e73; --faint: #aeaeb2;
-  --line: rgba(0, 0, 0, 0.1); --field: rgba(0, 0, 0, 0.05);
-  --page: #ffffff; --bar: #ececec; --sidebar: #ececec;
+  /* Few greys: one background for the page and its header, a slightly different sidebar, and controls
+     drawn with an outline rather than a grey fill, so text stands clear of everything around it. */
+  --text: #1d1d1f; --muted: #5e5e63; --faint: #8e8e93;
+  --line: rgba(0, 0, 0, 0.1); --field: transparent; --outline: rgba(0, 0, 0, 0.16);
+  --page: #ffffff; --bar: #ffffff; --sidebar: #f5f5f7; --selected: rgba(0, 0, 0, 0.08);
   --accent: #007aff; --cited: #248a3d; --cited-bg: rgba(36, 138, 61, 0.12); --warn: #d70015;
   --serif: "New York", "Iowan Old Style", Georgia, serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #f5f5f7; --muted: #98989d; --faint: #636366;
-    --line: rgba(255, 255, 255, 0.1); --field: rgba(255, 255, 255, 0.07);
-    --page: #212223; --bar: #2c2c2e; --sidebar: #2c2c2e;
+    --text: #f5f5f7; --muted: #aeaeb2; --faint: #8e8e93;
+    --line: rgba(255, 255, 255, 0.08); --field: transparent; --outline: rgba(255, 255, 255, 0.18);
+    --page: #1e1e1e; --bar: #1e1e1e; --sidebar: #161617; --selected: rgba(255, 255, 255, 0.12);
     --accent: #0a84ff; --cited: #30d158; --cited-bg: rgba(48, 209, 88, 0.15); --warn: #ff453a;
   }
 }
@@ -25,20 +27,20 @@ body { margin: 0; display: flex; background: var(--page); color: var(--text); fo
 
 .sidebar { width: 240px; flex-shrink: 0; height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column;
   padding: 28px 16px 18px; background: var(--sidebar); border-right: 1px solid var(--line); }
-.project-title { font: 700 22px var(--serif); line-height: 1.2; padding: 0 8px; }
+.project-title { font: 400 24px var(--serif); line-height: 1.2; padding: 0 8px; }
 .sidebar select { margin: 12px 0 18px; width: 100%; }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; }
 .sidebar nav a { color: var(--text); text-decoration: none; padding: 7px 10px; border-radius: 8px; font-size: 14px; }
 .sidebar nav a:hover { background: var(--field); }
-.sidebar nav a.selected { background: var(--field); font-weight: 600; }
+.sidebar nav a.selected { background: var(--selected); }
 .header-actions { display: flex; gap: 8px; align-items: center; }
 .header-actions #search { width: 150px; flex: 0 1 150px; min-width: 80px; padding: 5px 10px; }
 .page-header { gap: 16px; }
 .page-header h1 { white-space: nowrap; }
 .header-actions { min-width: 0; }
-.segmented { display: inline-flex; background: var(--field); border-radius: 8px; padding: 2px; }
-.segmented button { background: none; padding: 4px 14px; border-radius: 6px; }
-.segmented button.selected { background: var(--page); box-shadow: 0 0 0 0.5px var(--line); }
+.segmented { display: inline-flex; border: 1px solid var(--outline); border-radius: 8px; padding: 2px; }
+.segmented button { background: none; border: 0; padding: 4px 14px; border-radius: 6px; }
+.segmented button.selected { background: var(--selected); }
 .counts { margin-left: auto; font-size: 12px; color: var(--faint); }
 section.page { border-top: 0; padding-top: 4px; }
 section.page > h2, #temp-heading { margin: 22px 0 4px; }
@@ -57,19 +59,19 @@ section.page > h2, #temp-heading { margin: 22px 0 4px; }
 .pane { flex: 1; min-width: 0; }
 .page-header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center;
   height: 52px; padding: 0 24px; background: var(--bar); border-bottom: 1px solid var(--line); }
-.page-header h1 { font-size: 15px; font-weight: 700; margin: 0; }
+.page-header h1 { font-size: 15px; font-weight: 600; margin: 0; }
 .page-header .header-actions select, .page-header .header-actions button { padding: 5px 10px; }
 .server { font-size: 12px; color: var(--muted); }
 main { max-width: 900px; padding: 8px 36px 40px; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 18px 0 20px; }
 
-input, select, button { font: inherit; font-size: 13px; padding: 6px 12px; border: 0; border-radius: 8px; background: var(--field); color: var(--text); }
+input, select, button { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--outline); border-radius: 8px; background: var(--field); color: var(--text); }
 button { cursor: pointer; }
-button:hover { background: color-mix(in srgb, var(--accent) 14%, var(--field)); }
+button:hover { background: var(--selected); }
 section { border-top: 1px solid var(--line); padding: 18px 0 8px; margin-bottom: 8px; scroll-margin-top: 60px; }
 .section-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
-h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
+h2 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; }
 .tools { display: flex; gap: 8px; }
 .tools.wrap { flex-wrap: wrap; margin-top: 6px; }
 .summary { margin: -8px 0 20px; font-size: 13px; color: var(--muted); }
@@ -88,7 +90,8 @@ h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 #sources a { color: var(--text); font-weight: 600; text-decoration: none; }
 #sources a:hover { color: var(--accent); }
 .meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
-.tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--field); color: var(--muted); margin-right: 4px; }
+.tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--selected); color: var(--muted); margin-right: 4px; }
+.tag.kind { background: none; padding: 0; font-size: 12px; }   /* what kind of source: plain text, not a box */
 .tag.retracted { color: #fff; background: var(--warn); }
 .tag.temp { color: #c93400; background: rgba(255, 159, 10, 0.16); }
 .tag.cited { color: var(--cited); background: var(--cited-bg); }
@@ -103,14 +106,30 @@ h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacin
 .links { margin-top: 28px; }
 .links label { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; color: var(--text); cursor: pointer; }
 .links label:first-of-type { border-top: 1px solid var(--line); }
-.move { font-size: 12px; padding: 3px 6px; max-width: 140px; }
+.move { font-size: 12px; padding: 3px 6px; max-width: 240px; }
 .keep { font-size: 12px; padding: 3px 9px; }
-.forget { background: none; color: var(--muted); font-size: 18px; width: 28px; height: 28px; padding: 0; border-radius: 6px; }
+.forget { background: none; border: 0; color: var(--muted); font-size: 18px; width: 28px; height: 28px; padding: 0; border-radius: 6px; }
 .forget:hover { color: var(--warn); background: none; }
 .forget[data-armed="yes"] { color: #fff; background: var(--warn); }
 .danger { margin: 30px 0 0; text-align: right; }
-.danger button { color: var(--warn); background: none; font-size: 13px; }
+.danger button { color: var(--warn); background: none; border: 0; font-size: 13px; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--page); padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
 .toast.show { opacity: 1; }
 
 @media (max-width: 760px) { .sidebar { display: none; } main { padding: 8px 16px 40px; } }
+
+/* Evidence: each document's claims, what backs each one, and what needs a look. */
+.manage { margin: 10px 10px 0; font-size: 12px; color: var(--muted); text-decoration: none; }
+.manage:hover, .manage.selected { color: var(--text); }
+.document { margin-top: 26px; }
+.document-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.document-head .name { font: 400 18px var(--serif); }
+.document .meta { margin-bottom: 6px; }
+.claim { padding: 10px 0; border-top: 1px solid var(--line); }
+.claim .sentence { font-size: 14px; line-height: 1.45; }
+.finding { margin-top: 5px; padding-left: 8px; border-left: 3px solid var(--outline); font-size: 12px; color: var(--muted); }
+.finding.good { border-color: var(--cited); }
+.finding.warn { border-color: #ff9f0a; }
+.finding.bad { border-color: var(--warn); }
+.finding a { color: var(--text); }
+.finding q { display: block; margin-top: 3px; font-style: italic; }

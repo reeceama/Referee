@@ -10,6 +10,8 @@ the set's text, so VAR shows the work has changed.
 import json
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -90,7 +92,7 @@ class GitHubRepos:
             self.chosen.pop(repo, None)
             self._save()
             return {"ok": True}
-        self.chosen[repo] = {"side": side, "project": project}
+        self.chosen[repo] = {**self.chosen.get(repo, {}), "side": side, "project": project}
         self._save()
         return self.sync(repo)
 
@@ -115,5 +117,21 @@ class GitHubRepos:
                 continue
             purpose = "viva" if choice["side"] == "academic" else "interview"
             self.var.set_files(name.split("/")[-1], files, choice.get("project") or "", purpose)
+            choice["synced"] = time.time()
             done.append(name)
+        self._save()
         return {"ok": not failed, "synced": done, "failed": failed}
+
+    def watch(self, every: float = 3600) -> None:
+        """Keeps the chosen repositories current: each is updated once a day, in the background."""
+        def loop():
+            while True:
+                for name, choice in list(self.chosen.items()):
+                    if time.time() - (choice.get("synced") or 0) > 86400:
+                        try:
+                            self.sync(name)
+                        except Exception:
+                            pass
+                time.sleep(every)
+        if GH:
+            threading.Thread(target=loop, daemon=True).start()

@@ -2115,7 +2115,21 @@ struct GitHubRepositories: View {
     @State private var projects: [String] = []
     @State private var busy: String?
     @State private var problem: String?
-    @State private var showAll = false
+    @State private var adding = false
+    @State private var search = ""
+
+    /// Only the repositories VAR reads are listed; the rest are a search away, so many repositories don't crowd the page.
+    private var chosen: [[String: Any]] { repos.filter { $0["chosen"] is [String: Any] } }
+    private var others: [[String: Any]] {
+        let rest = repos.filter { !($0["chosen"] is [String: Any]) }
+            .sorted { ($0["updatedAt"] as? String ?? "") > ($1["updatedAt"] as? String ?? "") }   // recently updated first
+        let words = search.lowercased().split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return rest }
+        return rest.filter { repo in
+            let text = "\(repo["nameWithOwner"] as? String ?? "") \(repo["description"] as? String ?? "")".lowercased()
+            return words.allSatisfy(text.contains)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -2126,14 +2140,20 @@ struct GitHubRepositories: View {
                 HStack {
                     Text("Connected as \(login)").font(Scaled.style(12, .regular))
                     Spacer()
-                    Button("Update repositories") { Task { busy = "sync"; _ = await API.post("github/sync", [:], timeout: 300); busy = nil } }
+                    if busy == "sync" { ProgressView().controlSize(.mini) }
+                    Button("Update now") { Task { busy = "sync"; _ = await API.post("github/sync", [:], timeout: 300); busy = nil; await load() } }
                         .buttonStyle(.link).font(Scaled.style(11, .regular)).disabled(busy != nil)
+                        .help("Ticked repositories also update by themselves once a day")
                 }
-                ForEach(Array((showAll ? repos : Array(repos.prefix(8))).enumerated()), id: \.offset) { _, repo in row(repo) }
-                if repos.count > 8 {
-                    Button(showAll ? "Show fewer" : "Show all \(repos.count)") { showAll.toggle() }
-                        .buttonStyle(.link).font(Scaled.style(11, .regular))
+                ForEach(Array(chosen.enumerated()), id: \.offset) { _, repo in
+                    Hairline()
+                    row(repo)
                 }
+                Hairline()
+                Button { search = ""; adding = true } label: { Label("Add a repository", systemImage: "plus") }
+                    .buttonStyle(.borderless)
+                    .padding(.vertical, 4)
+                    .popover(isPresented: $adding, arrowEdge: .bottom) { addList }
                 if let problem { Text(problem).font(Scaled.style(11, .regular)).foregroundStyle(.secondary) }
             } else if status["installed"] as? Bool == true {
                 Text("Sign in with gh auth login in Terminal, then come back.").font(Scaled.style(12, .regular)).foregroundStyle(.secondary)
@@ -2142,6 +2162,50 @@ struct GitHubRepositories: View {
             }
         }
         .task { await load() }
+    }
+
+    /// Every other repository, recently updated first, with a search once there are more than a few.
+    private var addList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Search", text: $search).textFieldStyle(.roundedBorder)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    let shown = search.isEmpty ? Array(others.prefix(8)) : others
+                    if shown.isEmpty {
+                        Text(search.isEmpty ? "Every repository is added." : "No repository matches.")
+                            .font(Scaled.style(11, .regular)).foregroundStyle(.secondary).padding(.vertical, 6)
+                    }
+                    ForEach(Array(shown.enumerated()), id: \.offset) { _, repo in
+                        let name = repo["nameWithOwner"] as? String ?? ""
+                        Button {
+                            adding = false
+                            choose(name, "professional", "")
+                        } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 6) {
+                                    Text(name.split(separator: "/").last.map(String.init) ?? name).lineLimit(1)
+                                    if repo["isPrivate"] as? Bool == true { Image(systemName: "lock").font(.system(size: 10)).foregroundStyle(.secondary) }
+                                }
+                                if let about = repo["description"] as? String, !about.isEmpty {
+                                    Text(about).font(Scaled.style(10, .regular)).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if search.isEmpty && others.count > 8 {
+                        Text("\(others.count - 8) more: type to search all")
+                            .font(Scaled.style(10, .regular)).foregroundStyle(.secondary).padding(.top, 4)
+                    }
+                }
+            }
+            .frame(maxHeight: 300)
+        }
+        .padding(12)
+        .frame(width: 320)
     }
 
     private func load() async {
@@ -2153,32 +2217,39 @@ struct GitHubRepositories: View {
 
     @ViewBuilder private func row(_ repo: [String: Any]) -> some View {
         let name = repo["nameWithOwner"] as? String ?? ""
-        let chosen = repo["chosen"] as? [String: Any]
+        let chosen = repo["chosen"] as? [String: Any] ?? [:]
         HStack(spacing: 8) {
-            Toggle(isOn: Binding(get: { chosen != nil }, set: { on in choose(name, on ? "professional" : nil, "") })) {
-                Text(name.split(separator: "/").last.map(String.init) ?? name).font(Scaled.style(12, .regular))
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(name.split(separator: "/").last.map(String.init) ?? name).font(Scaled.style(12, .regular))
+                    if repo["isPrivate"] as? Bool == true { Image(systemName: "lock").font(.system(size: 10)).foregroundStyle(.secondary) }
+                }
+                if let synced = chosen["synced"] as? Double {
+                    Text("Updated " + Date(timeIntervalSince1970: synced).formatted(.relative(presentation: .named)))
+                        .font(Scaled.style(10, .regular)).foregroundStyle(.secondary)
+                }
             }
-            .toggleStyle(.checkbox)
-            if repo["isPrivate"] as? Bool == true { Image(systemName: "lock").font(.system(size: 10)).foregroundStyle(.secondary) }
             Spacer()
             if busy == name { ProgressView().controlSize(.mini) }
-            if let chosen {
-                Menu {
-                    Button("Professional") { choose(name, "professional", "") }
-                    SwiftUI.Section("Academic") {
-                        ForEach(projects, id: \.self) { project in Button(project) { choose(name, "academic", project) } }
-                        Button("No project") { choose(name, "academic", "") }
-                    }
-                } label: {
-                    Text(chosen["side"] as? String == "academic"
-                         ? "Academic" + ((chosen["project"] as? String).flatMap { $0.isEmpty ? nil : " · \($0)" } ?? "")
-                         : "Professional").font(Scaled.style(11, .regular))
+            Menu {
+                Button("Professional") { choose(name, "professional", "") }
+                SwiftUI.Section("Academic") {
+                    Button("No project") { choose(name, "academic", "") }
+                    ForEach(projects, id: \.self) { project in Button(project) { choose(name, "academic", project) } }
                 }
-                .menuStyle(.button).buttonStyle(.plain).foregroundStyle(.secondary).fixedSize()
-                .menuOrder(.fixed)
+            } label: {
+                Text(chosen["side"] as? String == "academic"
+                     ? "Academic" + ((chosen["project"] as? String).flatMap { $0.isEmpty ? nil : " · \($0)" } ?? "")
+                     : "Professional").font(Scaled.style(11, .regular))
             }
+            .menuStyle(.button).buttonStyle(.plain).foregroundStyle(.secondary).fixedSize()
+            .menuOrder(.fixed)
+            .help("What VAR practises from it: a viva on your write-up, or an interview on the project")
+            Button { choose(name, nil, "") } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .help("Stop VAR reading this repository. Nothing on GitHub changes.")
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 5)
     }
 
     private func choose(_ repo: String, _ side: String?, _ project: String) {

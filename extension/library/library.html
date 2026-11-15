@@ -13,10 +13,10 @@
       <div class="project-title" id="project-title">All reading</div>
       <select id="project" aria-label="Project"><option value="">All reading</option></select>
       <nav id="pages">
-        <a href="#reading" data-page="reading">Reading</a>
-        <a href="#references" data-page="references">References</a>
-        <a href="#projects-section" data-page="projects-section">Projects</a>
+        <a href="#reading" data-page="reading" data-also="references">Library</a>
+        <a href="#evidence" data-page="evidence">Evidence</a>
       </nav>
+      <a href="#projects-section" class="manage" data-page="projects-section">Manage projects</a>
       <div class="brand-foot"><img src="../icons/icon48.png" alt="" /><span>Referee</span></div>
     </aside>
 
@@ -80,6 +80,17 @@
             <select id="report-size" aria-label="Report font size"></select>
           </div>
         </div>
+      </section>
+
+      <section id="evidence" class="page">
+        <div class="section-head">
+          <div class="segmented" role="tablist" id="evidence-filter">
+            <button data-filter="all" role="tab">All</button>
+            <button data-filter="flagged" role="tab">Needs a look</button>
+          </div>
+          <span class="counts" id="evidence-count"></span>
+        </div>
+        <div id="documents"></div>
       </section>
 
       <section id="projects-section" class="page">

@@ -119,7 +119,7 @@ function renderSources() {
         <div class="meta">${escapeHtml([s.site, read].filter(Boolean).join(" · "))}</div>
         <div class="tags">
           ${s.retracted ? `<span class="tag retracted">Retracted</span>` : ""}
-          <span class="tag">${type}</span>
+          <span class="tag kind">${type}</span>
           ${n ? `<span class="tag cited">Cited ${n}×</span>` : ""}
         </div>
       </div>
@@ -255,7 +255,86 @@ async function createProject() {
 document.getElementById("new-project-create").onclick = createProject;
 document.getElementById("new-project-name").onkeydown = (event) => { if (event.key === "Enter") createProject(); };
 
+// Evidence, as in the Mac app's report: each document's claims, newest document first, each claim
+// with what backs it (source, statement, page) or what needs a look.
+let evidenceFilter = "all";
+try { evidenceFilter = localStorage.getItem("referee-evidence-filter") || "all"; } catch { /* storage blocked */ }
+
+function sourceLink(source, page) {
+  const saved = sources.find((s) => s.url === source?.url) || source || {};
+  const name = escapeHtml(saved.name || Cite.cleanTitle(saved) || saved.url || "a source");
+  const url = saved.url || "";
+  const href = url.startsWith("file://") ? `http://localhost:8000/source-file?url=${encodeURIComponent(url)}${page ? `#page=${page}` : ""}` : url;
+  return href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${name}</a>` : name;
+}
+
+function findings(c) {
+  const where = [c.statement, c.page ? `p. ${c.page}` : ""].filter(Boolean).join(", ");
+  const out = [];
+  if (c.label === "supports") {
+    out.push(["good", `Backed by ${sourceLink(c.source, c.page)}${where ? `, ${escapeHtml(where)}` : ""}`]);
+    if (c.overstated) out.push(["warn", `Stated more strongly than the source. ${escapeHtml(c.overstated)}${c.quote ? `<q>${escapeHtml(c.quote)}</q>` : ""}`]);
+  }
+  if (c.label === "contradicts") out.push(["bad", `${sourceLink(c.source, c.page)} says otherwise${c.quote ? `<q>${escapeHtml(c.quote)}</q>` : ""}`]);
+  if (c.label === "misquote" || c.misquote) out.push(["bad", `The quotation doesn't match ${sourceLink(c.source, c.page)}${c.quote ? `<q>${escapeHtml(c.quote)}</q>` : ""}`]);
+  if (c.label === "needs_source") out.push(["warn", "Needs a source: nothing you've read supports it"]);
+  if (c.too_close) out.push(["warn", "Very close to the source's wording"]);
+  for (const figure of c.wrong_numbers || []) out.push(["warn", `“${escapeHtml(figure)}” doesn't appear in the source`]);
+  return out;
+}
+
+function renderEvidence() {
+  const mine = claims.filter((c) => inProject(c.project));
+  const flagged = (c) => findings(c).some(([kind]) => kind !== "good");
+  const byDocument = new Map();
+  for (const c of mine) {
+    const name = c.document || "Other writing";
+    if (!byDocument.has(name)) byDocument.set(name, []);
+    byDocument.get(name).push(c);
+  }
+  const documents = [...byDocument].sort((a, b) => Math.max(...b[1].map((c) => c.at)) - Math.max(...a[1].map((c) => c.at)));
+  const all = mine.length, needs = mine.filter(flagged).length;
+  document.getElementById("evidence-count").textContent = all ? `${all} claim${all === 1 ? "" : "s"} · ${needs} need${needs === 1 ? "s" : ""} a look` : "";
+  document.querySelectorAll("#evidence-filter button").forEach((b) => b.classList.toggle("selected", b.dataset.filter === evidenceFilter));
+  const box = document.getElementById("documents");
+  if (!documents.length) {
+    box.innerHTML = `<p class="hint">Claims appear here as Referee checks your writing, in Word, Google Docs, Overleaf and the rest.</p>`;
+    return;
+  }
+  box.replaceChildren(...documents.map(([name, list]) => {
+    const shown = evidenceFilter === "flagged" ? list.filter(flagged) : list;
+    const count = (label) => list.filter((c) => c.label === label).length;
+    const strong = list.filter((c) => c.overstated).length;
+    const parts = [`${list.length} claim${list.length === 1 ? "" : "s"}`, `${count("supports")} backed`,
+      count("needs_source") && `${count("needs_source")} need${count("needs_source") === 1 ? "s" : ""} a source`,
+      count("contradicts") && `${count("contradicts")} contradicted`, strong && `${strong} stated too strongly`].filter(Boolean);
+    const section = document.createElement("div");
+    section.className = "document";
+    const project = list[0].project || "";
+    section.innerHTML = `<div class="document-head"><span class="name">${escapeHtml(name)}</span>
+      <select class="move" aria-label="Project for this document"><option value="">No project</option>
+      ${settings.projects.map((p) => `<option value="${escapeHtml(p)}" ${project === p ? "selected" : ""}>${escapeHtml(p)}</option>`).join("")}</select></div>
+      <div class="meta">${escapeHtml(parts.join(" · "))}</div>` +
+      (shown.length ? "" : `<p class="hint">Nothing needs a look.</p>`) +
+      shown.map((c) => `<div class="claim"><div class="sentence">${escapeHtml(c.sentence)}</div>` +
+        findings(c).map(([kind, text]) => `<div class="finding ${kind}">${text}</div>`).join("") + "</div>").join("");
+    section.querySelector(".move").addEventListener("change", async (event) => {
+      await chrome.runtime.sendMessage({ type: "post", path: "claims/document/project", body: { document: name, project: event.target.value } });
+      toast(event.target.value ? `Moved to ${event.target.value}` : "Moved to no project");
+      load();
+    });
+    return section;
+  }));
+}
+
+document.querySelectorAll("#evidence-filter button").forEach((button) => button.addEventListener("click", () => {
+  evidenceFilter = button.dataset.filter;
+  try { localStorage.setItem("referee-evidence-filter", evidenceFilter); } catch { /* storage blocked */ }
+  renderEvidence();
+}));
+
 function render() {
+  renderEvidence();
   renderProjects();
   renderLinks();
   renderSummary();
@@ -462,11 +541,11 @@ load();
 
 // One page at a time, like Referee for Mac: the sidebar and the Reading/References switch choose it.
 {
-  const titles = { reading: "Library", references: "Library", "projects-section": "Projects" };
+  const titles = { reading: "Library", references: "Library", evidence: "Evidence", "projects-section": "Projects" };
   const showPage = (page) => {
     if (!titles[page]) page = "reading";
     document.querySelectorAll("section.page").forEach((s) => { s.hidden = s.id !== page; });
-    document.querySelectorAll("[data-page]").forEach((el) => el.classList.toggle("selected", el.dataset.page === page));
+    document.querySelectorAll("[data-page]").forEach((el) => el.classList.toggle("selected", el.dataset.page === page || el.dataset.also === page));
     document.getElementById("page-title").textContent = titles[page];
     const library = page === "reading" || page === "references";
     document.querySelector(".controls").hidden = !library;
