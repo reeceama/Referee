@@ -7,6 +7,7 @@ then asked whether the paper has been retracted (its data includes Retraction Wa
 Lookups have short timeouts and failures are ignored: a source is never held up or lost.
 """
 
+import html
 import re
 from typing import Dict, Optional
 
@@ -53,10 +54,11 @@ def lookup(doi: str) -> Dict:
     people = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in data.get("author", []) if a.get("family")]
     parts = ((data.get("issued") or {}).get("date-parts") or [[]])[0]
     found = {
-        "title": data.get("title") or None,
+        # Without the markup some publishers put in titles ("<scp>CIELAB</scp>", "<i>k</i>").
+        "title": html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", data.get("title") or "")).strip()) or None,
         "author": "; ".join(people) or None,
         "date": "-".join(f"{p:02d}" if i else str(p) for i, p in enumerate(parts)) or None,
-        "site": data.get("container-title") or data.get("publisher") or None,
+        "site": html.unescape(data.get("container-title") or data.get("publisher") or "") or None,
         "volume": data.get("volume"),
         "issue": data.get("issue"),
         "pages": data.get("page") or data.get("article-number"),  # online-only journals number articles

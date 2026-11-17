@@ -93,7 +93,7 @@ enum Floating {
 
     struct Tint: View {
         @Environment(\.colorScheme) private var scheme
-        var body: some View { (scheme == .dark ? Color.black.opacity(0.32) : Color.white.opacity(0.35)) }
+        var body: some View { (scheme == .dark ? Color.black.opacity(0.5) : Color.white.opacity(0.5)) }
     }
 
     struct SidebarGlass: NSViewRepresentable {
@@ -121,7 +121,7 @@ enum Floating {
 // MARK: ⌘K
 
 struct FindResult: Identifiable {
-    enum Kind { case command, note, source, highlight, meeting, aiUse, passage }
+    enum Kind: CaseIterable { case command, note, source, highlight, meeting, aiUse, passage }
     let id = UUID()
     let kind: Kind
     let title: String
@@ -129,6 +129,8 @@ struct FindResult: Identifiable {
     var image: String? = nil      // passages from PDFs on this Mac: the passage as the page prints it
     var maths: String? = nil      // otherwise: the passage with its maths as $LaTeX$, to typeset
     var addToNotes: (() -> Void)? = nil   // passages: a new note quoting it, linked to its page
+    var project = ""   // searching every project: the one it's in, shown beside what it is
+    var marks: [String] = []   // what the search matched in it, marked
     let run: () -> Void
 }
 
@@ -182,6 +184,12 @@ final class FindModel: ObservableObject {
             for item in found["items"] as? [[String: Any]] ?? [] {
                 let title = item["title"] as? String ?? ""
                 let detail = item["detail"] as? String ?? ""
+                defer {
+                    if !more.isEmpty {
+                        if everywhere { more[more.count - 1].project = item["project"] as? String ?? "" }
+                        more[more.count - 1].marks = item["marks"] as? [String] ?? []
+                    }
+                }
                 switch item["kind"] as? String {
                 case "note":
                     let url = item["url"] as? String ?? ""
@@ -236,6 +244,9 @@ final class FindModel: ObservableObject {
             // A note titled exactly what was searched for comes first.
             let exact = more.filter { $0.kind == .note && $0.title.lowercased() == q.lowercased() }
             more = exact + more.filter { r in !exact.contains { $0.id == r.id } }
+            // In the order the groups are shown, so the arrow keys go down them in turn.
+            let rank = { (r: FindResult) in FindResult.Kind.allCases.firstIndex(of: r.kind) ?? 0 }
+            more = more.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
             results = more + matching
             // After SwiftUI has laid out the new results, so the panel grows to show them.
 
@@ -309,7 +320,12 @@ struct FindView: View {
                     Button("All Projects") { model.everywhere = true }
                 } label: {
                     HStack(spacing: 3) {
-                        Text(model.everywhere ? "All projects" : "This project")
+                        // Which project is searched, by name, so it's never a guess.
+                        Text(model.everywhere ? "All projects"
+                             : Model.shared.project.isEmpty ? "No project" : "This project · \(Model.shared.project)")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 300, alignment: .trailing)
                         Image(systemName: "chevron.down").font(.system(size: Scaled.s(9), weight: .semibold))
                     }
                     .font(.system(size: Scaled.s(13)))
@@ -375,10 +391,10 @@ struct FindView: View {
     /// Results by group, each with its place in the whole list for the arrow keys.
     private var groups: [(String, [(Int, FindResult)])] {
         let numbered: [(Int, FindResult)] = model.results.enumerated().map { ($0.offset, $0.element) }
-        let sets: [(String, [FindResult.Kind])] = [
-            (model.recent ? "Recent" : "Notes and sources", [.note, .source, .highlight, .meeting, .aiUse]),
-            ("In your reading", [.passage]),
-        ]
+        // Nothing typed: the latest, together. Otherwise a group for each kind of thing found.
+        let sets: [(String, [FindResult.Kind])] = model.recent
+            ? [("Recent", FindResult.Kind.allCases.filter { $0 != .passage }), ("In your reading", [.passage])]
+            : FindResult.Kind.allCases.map { (kindGroup($0), [$0]) }
         var found: [(String, [(Int, FindResult)])] = []
         for (name, kinds) in sets {
             let items = numbered.filter { kinds.contains($0.1.kind) }
@@ -431,12 +447,15 @@ struct FindView: View {
                         .font(.system(size: Scaled.s(15)))
                         .foregroundStyle(Color.accentColor)
                         .frame(width: 20)
-                    Text(result.title).font(.system(size: Scaled.s(15))).lineLimit(1)
+                    Text(marked(result.title, result.marks)).font(.system(size: Scaled.s(15))).lineLimit(1)
                     if !result.detail.isEmpty {
-                        Text(result.detail).font(.system(size: Scaled.s(14))).foregroundStyle(.secondary).lineLimit(1)
+                        Text(marked(result.detail, result.marks)).font(.system(size: Scaled.s(14))).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    Text(kindName(result.kind)).font(.system(size: Scaled.s(13))).foregroundStyle(.secondary)
+                    // Grouped by kind already: the project it's in, when searching every project.
+                    if !result.project.isEmpty {
+                        Text(marked(result.project, result.marks)).font(.system(size: Scaled.s(13))).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 .background(selected ? Color.primary.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -447,6 +466,36 @@ struct FindView: View {
         }
         .padding(.horizontal, 10)
         .contentShape(Rectangle())
+    }
+
+    /// The text with what the search matched given a soft yellow mark, as a highlighter would.
+    private func marked(_ text: String, _ marks: [String]) -> AttributedString {
+        var out = AttributedString(text)
+        let lower = text.lowercased()
+        for mark in marks where !mark.isEmpty {
+            var from = lower.startIndex
+            while let found = lower.range(of: mark.lowercased(), range: from..<lower.endIndex) {
+                if let start = AttributedString.Index(found.lowerBound, within: out),
+                   let end = AttributedString.Index(found.upperBound, within: out) {
+                    out[start..<end].backgroundColor = Color.yellow.opacity(0.32)
+                }
+                from = found.upperBound
+            }
+        }
+        return out
+    }
+
+    /// The heading over each kind's results.
+    private func kindGroup(_ kind: FindResult.Kind) -> String {
+        switch kind {
+        case .command: return "Commands"
+        case .note: return "Notes"
+        case .source: return "Sources"
+        case .highlight: return "Highlights"
+        case .meeting: return "Meetings"
+        case .aiUse: return "AI use"
+        case .passage: return "In your reading"
+        }
     }
 
     private func kindName(_ kind: FindResult.Kind) -> String {

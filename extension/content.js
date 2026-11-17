@@ -23,10 +23,18 @@ async function capturing() {
   return Boolean(await chrome.runtime.sendMessage({ type: "writing" }));
 }
 
+// A sign-in form someone can see (a login, banking or account page). Many article pages keep a hidden
+// sign-in form in their header (Wiley's has three password boxes); those pages are still read.
+function signInShown() {
+  return [...document.querySelectorAll('input[type="password"]')].some(
+    (box) => box.getClientRects().length > 0 && getComputedStyle(box).visibility !== "hidden"
+  );
+}
+
 // "Save for later" from the popup: hand over the page now, whether or not capture is on.
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message.type !== "capture-now") return;
-  if (isSkipped(location.href) || document.querySelector('input[type="password"]')) {
+  if (isSkipped(location.href) || signInShown()) {
     reply({ error: "Referee never saves this kind of page." });
     return;
   }
@@ -42,7 +50,7 @@ if (!isSkipped(location.href)) {
   async function capture() {
     if (sent || Date.now() < nextTry) return;
     nextTry = Date.now() + 10000;
-    if (document.querySelector('input[type="password"]')) return; // login, banking and account pages
+    if (signInShown()) return; // login, banking and account pages
     if (!(await capturing())) return;
     sent = true;
     clearInterval(timer);
@@ -80,7 +88,7 @@ if (!isSkipped(location.href)) {
     const selected = String(window.getSelection()).trim();
     if (selected.length < MIN_SELECTION) return;
     capture().catch(() => {});
-    if (document.querySelector('input[type="password"]') || !(await capturing().catch(() => false))) return;
+    if (signInShown() || !(await capturing().catch(() => false))) return;
     chrome.runtime.sendMessage({ type: "highlight", body: { url: location.href, text: selected.slice(0, 1000) } }).catch(() => {});
   });
 }

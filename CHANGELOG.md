@@ -2,6 +2,19 @@
 
 What changed in each release of Referee, newest first. Releases are numbered (`v1.0.0`), and downloaded copies of Referee for Mac update themselves to the latest one.
 
+## 1.1.3 (17 November 2026, `v1.1.3`)
+
+- **Settings has a sidebar**, like System Settings, with a page for each part: General, Checks, Reading, Writing, Integrations, and Privacy and help. The keyboard shortcuts are together under General. Under Writing, each writing app (Word, Google Docs, Overleaf, Obsidian, and R Markdown and Quarto) has a page of its own, so its settings are no longer behind a "Writing in" menu.
+- **Integrations is part of Settings** rather than a window of its own: Zotero is under Reading, GitHub under Writing, and tasks, Obsidian and the Meetings calendar under Integrations. They're laid out like the rest of Settings.
+- **Add API Key**, in the menu bar, opens Settings at Checks, where the keys are.
+- **VAR in Raycast**: a VAR command opens Referee at VAR.
+- **Search is easier to read**: results are grouped by kind (notes, sources, meetings, AI use, passages), with the words you typed marked in each. The bar names the project it's searching, and when searching every project, each result shows the project it's in. AI use entries are named by what they were for, not by the tool. A word a letter or two off, or written without its underscore ("model c" for model_c), still finds a match when nothing matches exactly. The panel is darker, so a bright window behind it no longer shows through.
+- **Linking a GitHub repository no longer adds it to VAR.** In Settings, a repository is linked to a project; to practise on it, add it from VAR's + menu, under From GitHub. A study set taken out of VAR stays out, rather than coming back when the repository next updates.
+- **Linked GitHub repositories update every hour**, rather than once a day.
+- **The browser extension saves journal pages with a hidden sign-in form**, such as Wiley's. It took any page with a password box for a login page and wouldn't save it; now only a sign-in form you can see stops it.
+- Titles and journal names looked up from a DOI no longer show the publisher's markup ("<scp>CIELAB</scp>", "&amp;").
+- **GitHub repositories keep updating after a force-push.** When a commit was amended and pushed again, Referee's copy stopped updating; it's now made to match GitHub.
+
 ## 1.1.2 (15 November 2026, `v1.1.2`)
 
 - **GitHub in Settings lists only the repositories VAR reads**, so it stays short however many you have. **Add a repository** searches the rest, recently updated first. Each shows when it was last updated, and they update by themselves once a day.

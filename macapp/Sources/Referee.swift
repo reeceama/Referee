@@ -385,7 +385,7 @@ struct MenuContent: View {
         Text(statusLine)
         Text("\(model.saved) Saved · \(model.temporary) Temporary")
         if model.online && !model.hasKey {
-            Button("Add API Key") { show("integrations") }
+            Button("Add API Key") { UserDefaults.standard.set("checks", forKey: "settingsPane"); show("settings") }
         }
         Divider()
         Toggle("Research Mode", isOn: Binding(get: { model.focus }, set: { model.setResearch($0) }))
@@ -595,7 +595,8 @@ struct SettingsView: View {
     @State private var local: [String: Any] = [:]   // which local models this Mac has
     @State private var openAIKey = ""
     @State private var showPrivacy = false
-    @State private var integrating = false   // Integrations open in place, with a way back
+    @AppStorage("settingsPane") private var pane = "general"   // the section shown
+    @State private var writingApp: String?   // a writing app's own page, opened from Writing
     @State private var copiedPairing = false
 
     /// The Google Docs add-on's files and its setup guide, inside the app (or the code folder).
@@ -611,28 +612,11 @@ struct SettingsView: View {
     var embedded = false   // shown in the main window, beside its sidebar, rather than in its own
 
     var body: some View {
-        if integrating {
-            VStack(alignment: .leading, spacing: 0) {
-                Button { integrating = false } label: { Label("Settings", systemImage: "chevron.left") }
-                    .buttonStyle(.link).padding(.horizontal, 20).padding(.top, 12)
-                IntegrationsView(model: model)
-            }
-        } else {
-            settings
-        }
-    }
-
-    @ViewBuilder private var settings: some View {
         if embedded {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    cards.padding(.top, 12)
-                }
-                .frame(maxWidth: 620, alignment: .leading)   // half the window, in its middle
-                .padding(.horizontal, 36)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.bottom, 28)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 0) {
+                sidebar
+                Divider()
+                detail
             }
         } else {
             window
@@ -640,68 +624,28 @@ struct SettingsView: View {
     }
 
     private var window: some View {
-        // The header stays put; the cards scroll beneath it, so the window stays a sensible height.
-        VStack(alignment: .leading, spacing: 14) {
+        // The header stays put; the sidebar and the section shown sit beneath it.
+        VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 22)
                 .padding(.top, 4)
-            ScrollView {
-                cards
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, 22)
+            Divider()
+            HStack(spacing: 0) {
+                sidebar
+                Divider()
+                detail
             }
-            .scrollIndicators(.automatic)
         }
-        .frame(width: 400, height: 560)
+        .frame(width: 720, height: 600)
         .background(WindowGlass().ignoresSafeArea())
     }
 
     private var cards: some View {
         // Grouped like System Settings: rows with the label on the left and the control on the
-        // right, and the longer explanations under each group.
+        // right, and the longer explanations under each group. One section at a time.
         VStack(alignment: .leading, spacing: 26) {
-            group("General", footer: nil) {
-                row("Open Referee at login") {
-                    Toggle("", isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
-                        .toggleStyle(.switch).labelsHidden()
-                }
-                row("Show in menu bar") {
-                    Toggle("", isOn: $showInMenuBar).toggleStyle(.switch).labelsHidden()
-                }
-                row("Show in Dock") {
-                    Toggle("", isOn: Binding(get: { showInDock }, set: { showInDock = $0; Dock.apply($0) }))
-                        .toggleStyle(.switch).labelsHidden()
-                }
-                row("Text size") {
-                    menu(TextSize.choices.first { $0.0 == textScale }?.1 ?? "Default") {
-                        Picker("Text size", selection: $textScale) {
-                            ForEach(TextSize.choices, id: \.0) { Text($0.1).tag($0.0) }
-                        }
-                    }
-                }
-                row("Heading font") {
-                    menu(headingFont) {
-                        Picker("Heading font", selection: $headingFont) {
-                            ForEach(Fonts.headingChoices, id: \.self) { Text($0).font(Fonts.font($0, 13, .semibold)).tag($0) }
-                        }
-                    }
-                }
-                row("Body font") {
-                    menu(bodyFont) {
-                        Picker("Body font", selection: $bodyFont) {
-                            ForEach(Fonts.bodyChoices, id: \.self) { Text($0).font(Fonts.font($0, 13, .regular)).tag($0) }
-                        }
-                    }
-                }
-                row("Setup") { Button("Run Setup Again") { Windows.open("setup") } }
-                Button { integrating = true } label: {
-                    row("Integrations", last: true) {
-                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
+            switch pane {
+            case "checks":
             group("Checks", footer: checksFooter) {
                 row("Check claims with", last: aiProvider != "ollama") {
                     menu(providers.first { $0.0 == aiProvider }?.1 ?? "Claude") {
@@ -770,6 +714,7 @@ struct SettingsView: View {
                     if !keyMessage.isEmpty { Text(keyMessage).font(Scaled.style(10, .regular)).foregroundStyle(.red) }
                 }
             }
+            case "reading":
             group("Reading", footer: BrowserExtension.defaultIsSafari
                   ? "Your default browser is Safari, which can't run Referee's extension: Referee works with it, but without capture while reading, highlights or the Overleaf and Google Docs panels. Chrome, Brave, Edge and Arc have everything."
                   : "The extension works in Chrome, Brave, Edge and Arc. Safari works with fewer features: no capture while reading, highlights or Overleaf and Google Docs panels.") {
@@ -796,34 +741,70 @@ struct SettingsView: View {
                         }
                     }
                 }
-                row("Research mode shortcut") { ShortcutRecorder(shortcut: .shared) }
-                row("Search shortcut") { ShortcutRecorder(shortcut: .find) }
-                row("Quick capture shortcut") { ShortcutRecorder(shortcut: .capture) }
                 ReadingFoldersRow(project: model.project)
                 row("Browser extension", last: true) {
                     Button("Install") { BrowserExtension.install(repo: repository) }
                 }
             }
-            group("Writing", footer: writingFooter) {
-                row("Writing in") {
-                    menu(["word": "Word", "overleaf": "Overleaf", "gdocs": "Google Docs", "obsidian": "Obsidian", "markdown": "R Markdown", "quarto": "Quarto"][writingIn] ?? "Word") {
-                        Picker("Writing in", selection: $writingIn) {
-                            // Documents, then notes, then documents with code, each group apart.
-                            SwiftUI.Section {
-                                Text("Word").tag("word")
-                                Text("Google Docs").tag("gdocs")
-                                Text("Overleaf").tag("overleaf")
-                            }
-                            SwiftUI.Section { Text("Obsidian").tag("obsidian") }
-                            SwiftUI.Section {
-                                Text("R Markdown").tag("markdown")
-                                Text("Quarto").tag("quarto")
+                IntegrationsView(model: model, part: .reading)
+            case "writing":
+            if writingApp != nil {
+                group("", footer: writingFooter) {
+                    if writingIn == "gdocs" {
+                        row("Add-on") {
+                            Button("Set Up") { NSWorkspace.shared.open(addOnFolder) }
+                        }
+                        row("Pairing code", last: true) {
+                            HStack(spacing: 8) {
+                                Button(copiedPairing ? "Copied" : "Copy Pairing Code") {
+                                    Task {
+                                        let code = (await API.get("pairing"))?["code"] as? String ?? ""
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(code, forType: .string)
+                                        copiedPairing = true
+                                    }
+                                }
+                                Button("New Code") { Task { _ = await API.post("pairing", [:]); copiedPairing = false } }
+                                    .help("Makes a fresh code. Paste it into the Google Docs panel again.")
                             }
                         }
                     }
+                    if writingIn == "word" {
+                        row("Mark sentences with") {
+                            menu(["underline": "Underline", "highlight": "Highlight", "none": "Nothing"][marks] ?? "Underline") {
+                                Picker("Mark sentences with", selection: Binding(get: { marks }, set: { marks = $0; WordSettings.marks = $0 })) {
+                                    Text("Underline").tag("underline")
+                                    Text("Highlight").tag("highlight")
+                                    Text("Nothing").tag("none")
+                                }
+                            }
+                        }
+                        row("Marks in the open document") { Button("Remove Marks") { WordSettings.removeMarks() } }
+                        row("Remove marks shortcut") { ShortcutRecorder(shortcut: .removeMarks) }
+                        row("Add citations automatically", last: true) {
+                            Toggle("", isOn: Binding(get: { autoCite }, set: { autoCite = $0; WordSettings.autoCite = $0 }))
+                                .toggleStyle(.switch).labelsHidden()
+                        }
+                    }
+                    if writingIn == "overleaf" {
+                        row("Citation style") { Text("Set in your document").foregroundStyle(.secondary) }
+                        row("Add citations automatically") {
+                            Toggle("", isOn: Binding(get: { overleafAutoCite }, set: { overleafAutoCite = $0; WordSettings.overleafAutoCite = $0 }))
+                                .toggleStyle(.switch).labelsHidden()
+                        }
+                        row("Code folder", last: true) { folderPicker($codeFolder, save: { WordSettings.codeFolder = $0 }) }
+                    }
+                    if writingIn == "obsidian" {
+                        row("Vault", last: true) { folderPicker($writingFolder, save: { WordSettings.writingFolder = $0 }) }
+                    }
+                    if writingIn == "markdown" || writingIn == "quarto" {
+                        row("Writing folder") { folderPicker($writingFolder, save: { WordSettings.writingFolder = $0 }) }
+                        row("Code folder", last: true) { folderPicker($codeFolder, save: { WordSettings.codeFolder = $0 }) }
+                    }
                 }
-                if writingIn == "word" || writingIn == "gdocs" {
-                    row("Citation style") {
+            } else {
+                group("Writing", footer: "Used by Word and Google Docs. LaTeX, R Markdown and Quarto documents set their own.") {
+                    row("Citation style", last: true) {
                         menu(styles.first { $0.0 == model.style }?.1 ?? "APA 7") {
                             Picker("Style", selection: Binding(get: { model.style }, set: { model.setStyle($0) })) {
                                 ForEach(styles, id: \.0) { Text($0.1).tag($0.0) }
@@ -831,58 +812,22 @@ struct SettingsView: View {
                         }
                     }
                 }
-                if writingIn == "gdocs" {
-                    row("Add-on") {
-                        Button("Set Up") { NSWorkspace.shared.open(addOnFolder) }
-                    }
-                    row("Pairing code", last: true) {
-                        HStack(spacing: 8) {
-                            Button(copiedPairing ? "Copied" : "Copy Pairing Code") {
-                                Task {
-                                    let code = (await API.get("pairing"))?["code"] as? String ?? ""
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(code, forType: .string)
-                                    copiedPairing = true
-                                }
+                group("Writing apps", footer: nil) {
+                    ForEach(Self.writingApps, id: \.0) { id, name, symbol in
+                        Button { writingIn = id; writingApp = id } label: {
+                            row(name, last: id == Self.writingApps.last?.0) {
+                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                             }
-                            Button("New Code") { Task { _ = await API.post("pairing", [:]); copiedPairing = false } }
-                                .help("Makes a fresh code. Paste it into the Google Docs panel again.")
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                if writingIn == "word" {
-                    row("Mark sentences with") {
-                        menu(["underline": "Underline", "highlight": "Highlight", "none": "Nothing"][marks] ?? "Underline") {
-                            Picker("Mark sentences with", selection: Binding(get: { marks }, set: { marks = $0; WordSettings.marks = $0 })) {
-                                Text("Underline").tag("underline")
-                                Text("Highlight").tag("highlight")
-                                Text("Nothing").tag("none")
-                            }
-                        }
-                    }
-                    row("Marks in the open document") { Button("Remove Marks") { WordSettings.removeMarks() } }
-                    row("Remove marks shortcut") { ShortcutRecorder(shortcut: .removeMarks) }
-                    row("Add citations automatically", last: true) {
-                        Toggle("", isOn: Binding(get: { autoCite }, set: { autoCite = $0; WordSettings.autoCite = $0 }))
-                            .toggleStyle(.switch).labelsHidden()
-                    }
-                }
-                if writingIn == "overleaf" {
-                    row("Citation style") { Text("Set in your document").foregroundStyle(.secondary) }
-                    row("Add citations automatically") {
-                        Toggle("", isOn: Binding(get: { overleafAutoCite }, set: { overleafAutoCite = $0; WordSettings.overleafAutoCite = $0 }))
-                            .toggleStyle(.switch).labelsHidden()
-                    }
-                    row("Code folder", last: true) { folderPicker($codeFolder, save: { WordSettings.codeFolder = $0 }) }
-                }
-                if writingIn == "obsidian" {
-                    row("Vault", last: true) { folderPicker($writingFolder, save: { WordSettings.writingFolder = $0 }) }
-                }
-                if writingIn == "markdown" || writingIn == "quarto" {
-                    row("Writing folder") { folderPicker($writingFolder, save: { WordSettings.writingFolder = $0 }) }
-                    row("Code folder", last: true) { folderPicker($codeFolder, save: { WordSettings.codeFolder = $0 }) }
-                }
+                IntegrationsView(model: model, part: .writing)
             }
+            case "apps":
+                IntegrationsView(model: model, part: .apps)
+            case "privacy":
             group("Privacy", footer: nil) {
                 row("What leaves this device", last: true) {
                     Button { showPrivacy = true } label: {
@@ -904,8 +849,99 @@ struct SettingsView: View {
             group("Help", footer: "Opens a GitHub issue with Referee's version and your macOS version filled in. You write the rest, and nothing is sent until you post it.") {
                 row("Report a problem", last: true) { Button("Report") { ReportProblem.open() } }
             }
-
+            default:
+            group("General", footer: nil) {
+                row("Open Referee at login") {
+                    Toggle("", isOn: Binding(get: { model.openAtLogin }, set: { model.setOpenAtLogin($0) }))
+                        .toggleStyle(.switch).labelsHidden()
+                }
+                row("Show in menu bar") {
+                    Toggle("", isOn: $showInMenuBar).toggleStyle(.switch).labelsHidden()
+                }
+                row("Show in Dock") {
+                    Toggle("", isOn: Binding(get: { showInDock }, set: { showInDock = $0; Dock.apply($0) }))
+                        .toggleStyle(.switch).labelsHidden()
+                }
+                row("Text size") {
+                    menu(TextSize.choices.first { $0.0 == textScale }?.1 ?? "Default") {
+                        Picker("Text size", selection: $textScale) {
+                            ForEach(TextSize.choices, id: \.0) { Text($0.1).tag($0.0) }
+                        }
+                    }
+                }
+                row("Heading font") {
+                    menu(headingFont) {
+                        Picker("Heading font", selection: $headingFont) {
+                            ForEach(Fonts.headingChoices, id: \.self) { Text($0).font(Fonts.font($0, 13, .semibold)).tag($0) }
+                        }
+                    }
+                }
+                row("Body font") {
+                    menu(bodyFont) {
+                        Picker("Body font", selection: $bodyFont) {
+                            ForEach(Fonts.bodyChoices, id: \.self) { Text($0).font(Fonts.font($0, 13, .regular)).tag($0) }
+                        }
+                    }
+                }
+                row("Setup", last: true) { Button("Run Setup Again") { Windows.open("setup") } }
+            }
+            group("Shortcuts", footer: nil) {
+                row("Research mode shortcut") { ShortcutRecorder(shortcut: .shared) }
+                row("Search shortcut") { ShortcutRecorder(shortcut: .find) }
+                row("Quick capture shortcut", last: true) { ShortcutRecorder(shortcut: .capture) }
+            }
+            }
         }
+    }
+
+    /// The writing apps, each with a page of its own under Writing: [(id, name, symbol)].
+    static let writingApps = [("word", "Word", "doc.text"), ("gdocs", "Google Docs", "doc.richtext"), ("overleaf", "Overleaf", "function"),
+                              ("obsidian", "Obsidian", "book.closed"), ("markdown", "R Markdown and Quarto", "chevron.left.forwardslash.chevron.right")]
+
+    /// The sections, as in System Settings' sidebar: [(id, title, symbol)].
+    static let panes = [("general", "General", "gearshape"), ("checks", "Checks", "checkmark.circle"),
+                        ("reading", "Reading", "books.vertical"), ("writing", "Writing", "pencil"),
+                        ("apps", "Integrations", "puzzlepiece.extension"), ("privacy", "Privacy and help", "lock")]
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Self.panes, id: \.0) { id, title, symbol in
+                Button { pane = id; writingApp = nil } label: {
+                    Label(title, systemImage: symbol)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .foregroundStyle(pane == id ? Color.white : Color.primary)
+                        .background(pane == id ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .frame(width: 190)
+    }
+
+    /// The section shown, with its title, scrolling beside the sidebar.
+    private var detail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if pane == "writing", let app = writingApp {
+                    // A writing app's page: its name, with the way back to Writing.
+                    Button { writingApp = nil } label: { Label("Writing", systemImage: "chevron.left") }
+                        .buttonStyle(.link)
+                    Text(Self.writingApps.first { $0.0 == app }?.1 ?? "").font(Scaled.style(17, .semibold))
+                } else {
+                    Text(Self.panes.first { $0.0 == pane }?.1 ?? "General").font(Scaled.style(17, .semibold))
+                }
+                cards
+            }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollIndicators(.automatic)
+        .id(pane)   // each section starts at its top
     }
 
     private let providers = [("ollama", "On this Mac (free)"), ("claude", "Claude (Anthropic)"), ("openai", "ChatGPT (OpenAI)")]
@@ -937,7 +973,7 @@ struct SettingsView: View {
         case "obsidian":
             return "Referee watches your vault and checks what you write in it, without changing your notes. Results appear in the Evidence report. Citations written as [@key] count as cited."
         case "markdown", "quarto":
-            return "Referee watches the writing folder and checks the \(writingIn == "quarto" ? ".qmd" : ".Rmd") files in it, without changing them. Results appear in the Evidence report. The code folder holds the code and results behind your writing: Referee lists libraries that should be cited, and figures that don't match your latest results."
+            return "Referee watches the writing folder and checks the .Rmd and .qmd files in it, without changing them. Results appear in the Evidence report. The code folder holds the code and results behind your writing: Referee lists libraries that should be cited, and figures that don't match your latest results."
         default:
             return "Green: supported. Amber: check the wording. Red: contradicted. Underlines show clearly in dark mode, where Word dims highlights. With automatic citations off, a comment suggests each citation for you to type, so you choose every one."
         }
@@ -946,7 +982,7 @@ struct SettingsView: View {
     /// A group of rows divided by hairlines, under a small capital label, with an explanation below.
     private func group<Content: View>(_ title: String, footer: String?, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(Scaled.style(13, .semibold)).padding(.leading, 4)
+            if !title.isEmpty { Text(title).font(Scaled.style(13, .semibold)).padding(.leading, 4) }
             VStack(spacing: 0) { content() }.settingsBox()
             if let footer {
                 Text(footer)
@@ -1228,7 +1264,7 @@ struct TodoistView: View {
     private static var made: [String: NSWindow] = [:]
 
     /// The parts of the main window: opening one opens the main window there.
-    static let sections: Set<String> = ["library", "evidence", "notes", "meetings", "ai-use", "settings"]
+    static let sections: Set<String> = ["library", "evidence", "notes", "meetings", "calendar", "ai-use", "var", "settings"]
 
     static func open(_ id: String) {
         var id = id
@@ -1245,7 +1281,7 @@ struct TodoistView: View {
             window.makeKeyAndOrderFront(nil)
             return
         }
-        let view = id == "setup" ? AnyView(OnboardingView(model: .shared)) : id == "main" ? AnyView(MainWindow(model: .shared)) : id == "integrations" ? AnyView(IntegrationsView(model: .shared)) : AnyView(SettingsView(model: .shared))
+        let view = id == "setup" ? AnyView(OnboardingView(model: .shared)) : id == "main" ? AnyView(MainWindow(model: .shared)) : AnyView(SettingsView(model: .shared))
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarAppearsTransparent = true
@@ -1343,12 +1379,6 @@ struct RefereeApp: App {
                 .background(WindowOpener())
             if !model.online { Text("⚠︎") }
         }
-        Window("Integrations", id: "integrations") {
-            IntegrationsView(model: model).background(WindowOpener())
-        }
-        .handlesExternalEvents(matching: [])   // referee:// links (from Raycast) open panels, not this window
-        .windowResizability(.contentSize)
-        .windowStyle(.hiddenTitleBar)
         Window("Referee", id: "main") {
             MainWindow(model: model).background(WindowOpener())
         }

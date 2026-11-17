@@ -207,6 +207,9 @@ final class NotesModel: ObservableObject {
             guard let target = items.first(where: { $0.name == "url" })?.value else { return }
             let page = items.first(where: { $0.name == "page" })?.value.flatMap(Int.init)
             openSource(target, page: page, pdf: target.lowercased().hasSuffix(".pdf") || target.hasPrefix("file://"))
+        case "open":
+            // A part of the main window, opened from elsewhere (Raycast): referee://open/var
+            Windows.open(id.isEmpty ? "library" : id)
         default:
             Windows.open("library")
         }

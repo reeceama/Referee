@@ -87,7 +87,8 @@ class GitHubRepos:
         return [r | {"chosen": self.chosen.get(r["nameWithOwner"])} for r in found]
 
     def choose(self, repo: str, side: Optional[str], project: str = "") -> Dict:
-        """Lets VAR read a repository (side "academic" or "professional"), or stops it (side None)."""
+        """Links a repository (side "academic", with its project, or "professional"), or unlinks it (side None).
+        Linking doesn't add it to VAR: that's chosen in VAR (practise)."""
         if not side:
             self.chosen.pop(repo, None)
             self._save()
@@ -99,8 +100,19 @@ class GitHubRepos:
     def _folder(self, repo: str) -> Path:
         return self.folder / repo.replace("/", "__")
 
-    def sync(self, repo: Optional[str] = None) -> Dict:
-        """Clones or pulls the chosen repositories, and gives VAR their text as it is now."""
+    def linked(self) -> List[Dict]:
+        """The linked repositories, for VAR's list to practise from: [{repo, side, project}]."""
+        return [{"repo": name, "side": c.get("side"), "project": c.get("project") or ""} for name, c in self.chosen.items()]
+
+    def practise(self, repo: str, purpose: Optional[str] = None) -> Dict:
+        """Adds a linked repository to VAR, as a study set of its own."""
+        if repo not in self.chosen:
+            return {"ok": False, "reason": "not_linked"}
+        return self.sync(repo, practise=True, purpose=purpose)
+
+    def sync(self, repo: Optional[str] = None, practise: bool = False, purpose: Optional[str] = None) -> Dict:
+        """Clones or pulls the linked repositories, and updates their VAR study sets, only where VAR has one
+        (a set taken out of VAR stays out), or adds one when practise is asked for."""
         done, failed = [], []
         for name, choice in list(self.chosen.items()):
             if repo and name != repo:
@@ -108,6 +120,11 @@ class GitHubRepos:
             folder = self._folder(name)
             if (folder / ".git").exists():
                 ok = subprocess.run(["git", "-C", str(folder), "pull", "--ff-only", "-q"], capture_output=True).returncode == 0
+                if not ok:
+                    # GitHub's history was rewritten (a commit amended and force-pushed, say), so it can't be
+                    # pulled. This copy is only read, never changed, so it's made to match GitHub again.
+                    ok = subprocess.run(["git", "-C", str(folder), "fetch", "-q", "origin"], capture_output=True).returncode == 0 and \
+                        subprocess.run(["git", "-C", str(folder), "reset", "-q", "--hard", "@{u}"], capture_output=True).returncode == 0
             else:
                 self.folder.mkdir(parents=True, exist_ok=True)
                 ok = _gh("repo", "clone", name, str(folder), "--", "--depth", "1", "-q", timeout=300) is not None
@@ -115,19 +132,22 @@ class GitHubRepos:
             if not files:
                 failed.append(name)
                 continue
-            purpose = "viva" if choice["side"] == "academic" else "interview"
-            self.var.set_files(name.split("/")[-1], files, choice.get("project") or "", purpose)
+            set_name = name.split("/")[-1]
+            if practise or set_name in self.var.data["documents"]:
+                use = purpose or (self.var.data["documents"].get(set_name) or {}).get("purpose") or \
+                    ("viva" if choice["side"] == "academic" else "interview")
+                self.var.set_files(set_name, files, (choice.get("project") or "") if use == "viva" else "", use)
             choice["synced"] = time.time()
             done.append(name)
         self._save()
         return {"ok": not failed, "synced": done, "failed": failed}
 
-    def watch(self, every: float = 3600) -> None:
-        """Keeps the chosen repositories current: each is updated once a day, in the background."""
+    def watch(self, every: float = 600) -> None:
+        """Keeps the linked repositories current: each is updated once an hour, in the background."""
         def loop():
             while True:
                 for name, choice in list(self.chosen.items()):
-                    if time.time() - (choice.get("synced") or 0) > 86400:
+                    if time.time() - (choice.get("synced") or 0) > 3600:
                         try:
                             self.sync(name)
                         except Exception:

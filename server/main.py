@@ -1891,6 +1891,20 @@ def phone_switch(body: dict):
     return phone.status()
 
 
+def close(a: str, b: str, most: int) -> bool:
+    # Whether two words are at most `most` letters apart (added, removed or changed).
+    if abs(len(a) - len(b)) > most:
+        return False
+    row = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        prev, row[0] = row[0], i
+        for j, y in enumerate(b, 1):
+            prev, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, prev + (x != y))
+        if min(row) > most:
+            return False
+    return row[-1] <= most
+
+
 @app.get("/find")
 def find(q: str, project: str = "", every: bool = Query(False, alias="all")):
     # The ⌘K box: notes, sources, meetings and AI use whose words match, and the passages in your
@@ -1913,41 +1927,78 @@ def find(q: str, project: str = "", every: bool = Query(False, alias="all")):
                              "url": s_["url"]} for s_ in saved],
                 "passages": [], "recent": True}
 
+    def hits(text: str) -> List[str]:
+        # What in the text each word matched: the word itself; the same letters without the
+        # punctuation ("model c" or "modelc" for model_c); or a word one letter off (two for long
+        # words), as a typo would be. Empty when any word isn't found.
+        text = (text or "").lower()
+        tokens = re.findall(r"[0-9a-z]+", text)
+        found = []
+        for w in words:
+            if w in text:
+                found.append(w)
+                continue
+            plain = re.sub(r"[^0-9a-z]+", "", w)
+            if len(plain) >= 3 and plain in re.sub(r"[^0-9a-z]+", "", text):
+                found.append("")    # found, though not as one stretch of the text to mark
+                continue
+            allowed = 0 if not loose else 2 if len(plain) >= 8 else 1 if len(plain) >= 4 else 0
+            near = next((t for t in tokens if allowed and (close(plain, t, allowed) or
+                                                           (len(t) > len(plain) and close(plain, t[:len(plain)], allowed)))), None)
+            if near is None:
+                return []
+            found.append(near)
+        return found
+
     def matches(*fields) -> bool:
-        text = " ".join(f or "" for f in fields).lower()
-        return all(w in text for w in words)
+        return bool(hits(" ".join(f or "" for f in fields)))
 
     def in_scope(item_project) -> bool:
         return scope is None or (item_project or "") == scope
 
-    items = []
-    for n in notes.all():
-        if in_scope(n.get("project")) and matches(n.get("title"), n.get("body"),
-                                                   source_title(n["url"]) if n.get("url") else ""):
-            items.append({"kind": "note", "id": n["id"], "title": n["text"],
-                          "detail": " · ".join(x for x in (source_title(n["url"]) if n.get("url") else "",
-                                                            f"p. {n['page']}" if n.get("page") else "") if x),
-                          "url": n.get("url"), "page": n.get("page")})
-    for s_ in sources():
-        if in_scope(s_.get("project")) and matches(s_.get("name"), s_.get("title"), s_.get("author"), s_.get("site")):
-            items.append({"kind": "source", "id": s_["url"], "title": s_.get("name") or s_.get("title") or s_["url"],
-                          "detail": " · ".join(x for x in (s_.get("site"), (s_.get("date") or "")[:4]) if x), "url": s_["url"]})
-    for m in meetings.all():
-        if in_scope(m.get("project")) and matches(m.get("title"), m.get("notes"), m.get("decisions"), m.get("attendees"),
-                                                   " ".join(a.get("text", "") for a in m.get("actions", []))):
-            items.append({"kind": "meeting", "id": m["id"], "title": m.get("title") or "Meeting", "detail": m.get("date")})
-    # Text highlighted while reading, by its words, opening its source.
-    for url, marked in highlights.notes.items():
-        saved = next((s_ for s_ in sources() if s_.get("url") == url), None)
-        if saved is None or not in_scope(saved.get("project")):
-            continue
-        for h in marked:
-            if matches(h.get("text")):
-                items.append({"kind": "highlight", "id": f"{url}#{h.get('text', '')[:40]}", "title": h["text"],
-                              "detail": "Highlight · " + source_title(url), "url": url})
-    for e in ai_log.all():
-        if in_scope(e.get("project")) and matches(e.get("tool"), e.get("purpose"), e.get("prompt"), e.get("checked")):
-            items.append({"kind": "ai-use", "id": e["id"], "title": e.get("tool") or "AI use", "detail": e.get("date")})
+    # Exactly what was typed first; only when nothing matches, words a letter or two off as well.
+    for loose in (False, True):
+        items = []
+        for n in notes.all():
+            if in_scope(n.get("project")) and matches(n.get("title"), n.get("body"),
+                                                       source_title(n["url"]) if n.get("url") else ""):
+                items.append({"kind": "note", "id": n["id"], "title": n["text"],
+                              "detail": " · ".join(x for x in (source_title(n["url"]) if n.get("url") else "",
+                                                                f"p. {n['page']}" if n.get("page") else "") if x),
+                              "url": n.get("url"), "page": n.get("page"), "project": n.get("project") or ""})
+        for s_ in sources():
+            if in_scope(s_.get("project")) and matches(s_.get("name"), s_.get("title"), s_.get("author"), s_.get("site")):
+                items.append({"kind": "source", "id": s_["url"], "title": s_.get("name") or s_.get("title") or s_["url"],
+                              "detail": " · ".join(x for x in (s_.get("site"), (s_.get("date") or "")[:4]) if x), "url": s_["url"],
+                              "project": s_.get("project") or ""})
+        for m in meetings.all():
+            if in_scope(m.get("project")) and matches(m.get("title"), m.get("notes"), m.get("decisions"), m.get("attendees"),
+                                                       " ".join(a.get("text", "") for a in m.get("actions", []))):
+                items.append({"kind": "meeting", "id": m["id"], "title": m.get("title") or "Meeting", "detail": m.get("date"),
+                              "project": m.get("project") or ""})
+        # Text highlighted while reading, by its words, opening its source.
+        for url, marked in highlights.notes.items():
+            saved = next((s_ for s_ in sources() if s_.get("url") == url), None)
+            if saved is None or not in_scope(saved.get("project")):
+                continue
+            for h in marked:
+                if matches(h.get("text")):
+                    items.append({"kind": "highlight", "id": f"{url}#{h.get('text', '')[:40]}", "title": h["text"],
+                                  "detail": "Highlight · " + source_title(url), "url": url,
+                                  "project": saved.get("project") or ""})
+        for e in ai_log.all():
+            if in_scope(e.get("project")) and matches(e.get("tool"), e.get("purpose"), e.get("prompt"), e.get("checked")):
+                # Named by what it was for (its purpose, or else the start of the prompt), with the tool beside it.
+                named = (e.get("purpose") or "").strip() or " ".join((e.get("prompt") or "").split())[:80] or "AI use"
+                items.append({"kind": "ai-use", "id": e["id"], "title": named, "project": e.get("project") or "",
+                              "detail": " · ".join(x for x in (e.get("tool"), e.get("date")) if x)})
+
+        if items:
+            break
+    # What each result matched, to mark in it.
+    for item in items:
+        item["marks"] = sorted({h for h in hits(" ".join(str(item.get(k) or "") for k in ("title", "detail", "project"))) if h},
+                               key=len, reverse=True)
 
     passages = []
     if len(q.strip()) >= 3:
@@ -1972,7 +2023,7 @@ def find(q: str, project: str = "", every: bool = Query(False, alias="all")):
                              "project": r["source"].get("project") or "",
                              "image": page_crop.image(r["source"].get("url") or "", r.get("page"), r["text"]),
                              "title": source_title(r["source"].get("url"))})
-    return {"items": items[:12], "passages": passages if every else passages[:8]}
+    return {"items": items[:40], "passages": passages if every else passages[:8]}
 
 
 @app.post("/statements/preview")
@@ -2241,8 +2292,20 @@ def github_list():
 
 @app.post("/github/repos")
 def github_choose(body: dict):
-    # {"repo", "side": "academic" | "professional" | null, "project"}: VAR may read it, or not.
+    # {"repo", "side": "academic" | "professional" | null, "project"}: linked to a project, or not. VAR only
+    # practises on it when chosen there (/var/github).
     return github_repos.choose(body.get("repo") or "", body.get("side"), body.get("project") or "")
+
+
+@app.get("/github/linked")
+def github_linked():
+    return github_repos.linked()
+
+
+@app.post("/var/github")
+def var_github(body: dict):
+    # {"repo", "purpose"}: practise on a linked repository in VAR.
+    return github_repos.practise(body.get("repo") or "", body.get("purpose"))
 
 
 @app.post("/github/sync")

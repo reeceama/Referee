@@ -1,11 +1,14 @@
 import SwiftUI
 
-/// The services and apps Referee connects to, in one page: the Anthropic key, the to-do app that
-/// gets meeting action points (one at a time, so a task never lands in two), Obsidian, Zotero and
-/// the calendar. Keys and tokens are kept in the Keychain.
+/// The services and apps Referee connects to, each shown in its own part of Settings: Zotero in
+/// Reading, GitHub in Writing, and the to-do app that gets meeting action points (one at a time, so a
+/// task never lands in two), Obsidian and the calendar in Integrations. Tokens are kept in the Keychain.
 struct IntegrationsView: View {
 
+    enum Part { case reading, writing, apps }
+
     @ObservedObject var model: Model
+    var part: Part = .apps
     @State private var tasks: [String: Any] = [:]
     @State private var zotero: [String: Any] = [:]
     @State private var phone: [String: Any] = [:]
@@ -21,12 +24,9 @@ struct IntegrationsView: View {
     ]
 
     var body: some View {
-        Page {
-            Text("Apps Referee sends tasks and notes to. Tokens are kept in your Keychain; AI keys are in Settings → Keys.")
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
-
-            section("Tasks: choose one", footer: "Each meeting's tasks go to your to-do app with their deadlines, in a list named after the Referee project. Only one app at a time, so tasks aren't duplicated.") {
+        VStack(alignment: .leading, spacing: 26) {
+            if part == .apps {
+            section("Tasks", footer: "Each meeting's tasks go to your to-do app with their deadlines, in a list named after the Referee project. Only one app at a time, so tasks aren't duplicated.") {
                 ForEach(apps, id: \.0) { id, name, about in
                     VStack(alignment: .leading, spacing: 8) {
                         Button { choose(id) } label: {
@@ -59,15 +59,19 @@ struct IntegrationsView: View {
             }
 
             // The iPhone section returns with the iPhone app (server/phone_sync.py is ready, and off).
-            section("Notes", footer: "Referee writes your reading notes (one file per source, with links that open it at the page) and meeting notes into this folder as Markdown, and keeps them up to date. Edits made to these files in Obsidian are overwritten, so keep your own notes in your own files.") {
-                row("Obsidian folder") {
+            }
+            if part == .apps {
+            section("Obsidian", footer: "Referee writes your reading notes (one file per source, with links that open it at the page) and meeting notes into this folder as Markdown, and keeps them up to date. Edits made to these files in Obsidian are overwritten, so keep your own notes in your own files.") {
+                row("Obsidian folder", last: true) {
                     folderControl($obsidianFolder) { WordSettings.obsidianFolder = $0 }
                 }
             }
 
-            section("Reading", footer: zoteroFooter) {
+            }
+            if part == .reading {
+            section("Zotero", footer: zoteroFooter) {
                 if let collections = zotero["collections"] as? [[String: Any]] {
-                    row("Zotero collection") {
+                    row("Zotero collection", last: zotero["collection"] as? String == nil) {
                         Menu {
                             Button("None") { setZotero(nil) }
                             Divider()
@@ -80,23 +84,27 @@ struct IntegrationsView: View {
                         .fixedSize()
                     }
                     if zotero["collection"] as? String != nil {
-                        row("Adds papers to") {
+                        row("Adds papers to", last: true) {
                             Text(zotero["project"] as? String ?? "No project").foregroundStyle(.secondary)
                         }
                     }
                 } else {
-                    row("Zotero") { Text("Not running").foregroundStyle(.secondary) }
+                    row("Zotero", last: true) { Text("Not running").foregroundStyle(.secondary) }
                 }
             }
 
-            section("GitHub", footer: "VAR practises on the repositories you add: on the Academic side, your write-up (.tex, R Markdown or Quarto) with its code; on the Professional side, the README, code and notebooks. Each is copied to this Mac read-only and updated once a day. Referee uses the GitHub CLI signed in on this Mac, so it never sees your token, and only reads what you add.") {
+            }
+            if part == .writing {
+            section("GitHub", footer: "Repositories you add here are linked to a project (Academic) or to your professional work. To practise on one, add it in VAR: on the Academic side, VAR uses your write-up (.tex, R Markdown or Quarto) with its code; on the Professional side, the README, code and notebooks. Each is copied to this Mac read-only and updated every hour. Referee uses the GitHub CLI signed in on this Mac, so it never sees your token, and only reads what you add.") {
                 GitHubRepositories()
             }
+            }
+            if part == .apps {
             section("Meetings", footer: "In Meetings, the calendar button lists your events from two days ago to a week ahead, from the calendars on this Mac, including Google Calendar: add your Google account in System Settings → Internet Accounts, with Calendars switched on. Referee only reads them. Choosing one starts its notes with the title, date and attendees.") {
-                row("Calendar") { Text("Ready in Meetings").foregroundStyle(.secondary) }
+                row("Calendar", last: true) { Text("Ready in Meetings").foregroundStyle(.secondary) }
+            }
             }
         }
-        .frame(minWidth: 560, idealWidth: 620, minHeight: 600, idealHeight: 720)
         .task { await refresh() }
     }
 
@@ -137,23 +145,26 @@ struct IntegrationsView: View {
     // MARK: Layout, matching Settings
 
     private func section<Content: View>(_ title: String, footer: String? = nil, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Hairline().padding(.top, 22).padding(.bottom, 10)
-            FieldLabel(title)
-            VStack(alignment: .leading, spacing: 0) { content() }
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(Scaled.style(13, .semibold)).padding(.leading, 4)
+            VStack(alignment: .leading, spacing: 0) { content() }.settingsBox()
             if let footer {
-                Text(footer).font(Scaled.style(10, .regular)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(footer).font(Scaled.style(11, .regular)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 4)
             }
         }
     }
 
-    private func row<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            control()
+    private func row<Control: View>(_ label: String, last: Bool = false, @ViewBuilder control: () -> Control) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(label)
+                Spacer()
+                control()
+            }
+            .padding(.vertical, 9)
+            if !last { Hairline() }
         }
-        .padding(.vertical, 8)
     }
 
     private func folderControl(_ folder: Binding<String>, save: @escaping (String) -> Void) -> some View {

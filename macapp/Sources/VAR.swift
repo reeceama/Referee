@@ -345,7 +345,28 @@ final class VARModel: ObservableObject {
     /// Documents Referee has read in Overleaf, Google Docs or Word, newest first.
     @Published var writing: [[String: Any]] = []
 
-    func loadWriting() async { writing = await API.getList("var/writing") }
+    /// Repositories linked in Settings → Writing → GitHub, which can be practised on here.
+    @Published var github: [[String: Any]] = []
+
+    func loadWriting() async {
+        writing = await API.getList("var/writing")
+        github = await API.getList("github/linked")
+    }
+
+    /// Practise on a linked GitHub repository: it becomes a study set of its own.
+    func fromGitHub(_ repo: String, purpose: String) {
+        notice = nil
+        Task {
+            let found = await API.post("var/github", ["repo": repo, "purpose": purpose], timeout: 300)
+            guard found?["ok"] as? Bool == true else {
+                notice = "Couldn't read that repository from GitHub. Check you're signed in to GitHub, then try again."
+                return
+            }
+            if purpose != "viva" && side != "professional" { side = "professional" }
+            document = repo.split(separator: "/").last.map(String.init) ?? repo
+            await reload()
+        }
+    }
 
     /// Practise on one of those documents, from its sentences as last read.
     func fromWriting(_ name: String, purpose: String) {
@@ -661,6 +682,15 @@ struct VARView: View {
                     Button((doc["title"] as? String ?? "") + (editor.isEmpty ? "" : " · \(editor)")) {
                         model.fromWriting(doc["document"] as? String ?? "", purpose: purpose)
                     }
+                }
+            }
+            Divider()
+        }
+        if !model.github.isEmpty {
+            SwiftUI.Section("From GitHub") {
+                ForEach(Array(model.github.enumerated()), id: \.offset) { _, linked in
+                    let repo = linked["repo"] as? String ?? ""
+                    Button(repo.split(separator: "/").last.map(String.init) ?? repo) { model.fromGitHub(repo, purpose: purpose) }
                 }
             }
             Divider()
@@ -2108,7 +2138,8 @@ enum BriefReader {
 }
 
 
-/// The GitHub repositories VAR may read, each on a side (and, for Academic, under a Referee project).
+/// The GitHub repositories linked to Referee, each on a side (and, for Academic, under a Referee project). VAR
+/// practises on one only when it's added there.
 struct GitHubRepositories: View {
     @State private var status: [String: Any] = [:]
     @State private var repos: [[String: Any]] = []
@@ -2118,7 +2149,7 @@ struct GitHubRepositories: View {
     @State private var adding = false
     @State private var search = ""
 
-    /// Only the repositories VAR reads are listed; the rest are a search away, so many repositories don't crowd the page.
+    /// Only the linked repositories are listed; the rest are a search away, so many repositories don't crowd the page.
     private var chosen: [[String: Any]] { repos.filter { $0["chosen"] is [String: Any] } }
     private var others: [[String: Any]] {
         let rest = repos.filter { !($0["chosen"] is [String: Any]) }
@@ -2218,38 +2249,46 @@ struct GitHubRepositories: View {
     @ViewBuilder private func row(_ repo: [String: Any]) -> some View {
         let name = repo["nameWithOwner"] as? String ?? ""
         let chosen = repo["chosen"] as? [String: Any] ?? [:]
+        // The name on one line, and under it the project it belongs to and when it was last updated,
+        // so the row stays two lines high however narrow Settings is.
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(name.split(separator: "/").last.map(String.init) ?? name).font(Scaled.style(12, .regular))
+                    Text(name.split(separator: "/").last.map(String.init) ?? name)
+                        .lineLimit(1).truncationMode(.middle)
                     if repo["isPrivate"] as? Bool == true { Image(systemName: "lock").font(.system(size: 10)).foregroundStyle(.secondary) }
                 }
-                if let synced = chosen["synced"] as? Double {
-                    Text("Updated " + Date(timeIntervalSince1970: synced).formatted(.relative(presentation: .named)))
-                        .font(Scaled.style(10, .regular)).foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Menu {
+                        Button("Professional") { choose(name, "professional", "") }
+                        SwiftUI.Section("Academic") {
+                            Button("No project") { choose(name, "academic", "") }
+                            ForEach(projects, id: \.self) { project in Button(project) { choose(name, "academic", project) } }
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text(chosen["side"] as? String == "academic"
+                                 ? "Academic" + ((chosen["project"] as? String).flatMap { $0.isEmpty ? nil : " · \($0)" } ?? "")
+                                 : "Professional").lineLimit(1)
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 8))
+                        }
+                    }
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize(horizontal: false, vertical: true)
+                    .menuOrder(.fixed)
+                    .help("Which project it belongs to. To practise on it, add it in VAR.")
+                    if let synced = chosen["synced"] as? Double {
+                        Text("· Updated " + Date(timeIntervalSince1970: synced).formatted(.relative(presentation: .named))).lineLimit(1)
+                    }
                 }
+                .font(Scaled.style(11, .regular)).foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: 8)
             if busy == name { ProgressView().controlSize(.mini) }
-            Menu {
-                Button("Professional") { choose(name, "professional", "") }
-                SwiftUI.Section("Academic") {
-                    Button("No project") { choose(name, "academic", "") }
-                    ForEach(projects, id: \.self) { project in Button(project) { choose(name, "academic", project) } }
-                }
-            } label: {
-                Text(chosen["side"] as? String == "academic"
-                     ? "Academic" + ((chosen["project"] as? String).flatMap { $0.isEmpty ? nil : " · \($0)" } ?? "")
-                     : "Professional").font(Scaled.style(11, .regular))
-            }
-            .menuStyle(.button).buttonStyle(.plain).foregroundStyle(.secondary).fixedSize()
-            .menuOrder(.fixed)
-            .help("What VAR practises from it: a viva on your write-up, or an interview on the project")
             Button { choose(name, nil, "") } label: { Image(systemName: "xmark") }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)
-                .help("Stop VAR reading this repository. Nothing on GitHub changes.")
+                .help("Unlink this repository. Nothing on GitHub changes.")
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 7)
     }
 
     private func choose(_ repo: String, _ side: String?, _ project: String) {
