@@ -77,6 +77,10 @@ struct MainWindow: View {
     @AppStorage("beforeSettings") private var beforeSettings = Section.library.rawValue
     @State private var about = false
     @State private var choosingProject = false
+    /// Where the project popover opens: the list (a left click), or Rename or Also cite from (right-click menu).
+    @State private var projectStep = ProjectPopover.Step.list
+    @State private var deletingProject = false
+    @State private var projectOrder = "created"
     @State private var dues: [String: Date] = [:]
     private var dueDate: Date? { dues[model.project] }
     @State private var submitted: [String: Date] = [:]
@@ -263,12 +267,38 @@ struct MainWindow: View {
         }
     }
 
+    /// The project title's right-click menu: the current project's options, and how projects are sorted.
+    @ViewBuilder private var projectOptions: some View {
+        if !model.project.isEmpty {
+            Button("Due date") { settingDue = true }
+            if model.projects.count > 1 { Button("Also cite from") { projectStep = .citeFrom; choosingProject = true } }
+            Button("Rename") { projectStep = .rename; choosingProject = true }
+            Button("Archive project") {
+                let name = model.project
+                Task { _ = await API.post("projects/archive", ["project": name, "archived": true]); model.refresh(full: true) }
+            }
+            Button("Delete project", role: .destructive) { deletingProject = true }
+            Divider()
+        }
+        // How projects are listed in the switcher and in every other list of them.
+        Menu("Sort projects") {
+            ForEach([("name", "By name"), ("created", "By date created")], id: \.0) { order, label in
+                Button {
+                    projectOrder = order
+                    Task { _ = await API.post("settings", ["project_order": order]); model.refresh(full: true) }
+                } label: {
+                    if projectOrder == order { Label(label, systemImage: "checkmark") } else { Text(label) }
+                }
+            }
+        }
+    }
+
     /// The sidebar: the project, the sections, the documents, and Referee at the bottom.
     private var sidebarColumn: some View {
         // One sidebar list, so macOS draws it as glass: the project, the sections, then the documents.
         List {
             // The project, as the sidebar's title (two lines at most); click it to switch.
-            Button { choosingProject = true } label: {
+            Button { projectStep = .list; choosingProject = true } label: {
                 Text(model.project.isEmpty ? "No project" : model.project)
                     .font(Fonts.heading(20, .bold))
                     .lineLimit(2)
@@ -282,8 +312,19 @@ struct MainWindow: View {
             .popover(isPresented: $choosingProject, arrowEdge: .bottom) {
                 ProjectPopover(current: model.project, projects: model.projects,
                                choose: { model.setProject($0) }, close: { choosingProject = false; model.refresh(full: true) },
-                               setDue: { settingDue = true })
+                               setDue: { settingDue = true }, start: projectStep)
             }
+            .contextMenu { projectOptions }
+            .confirmationDialog("Delete “\(model.project)”?", isPresented: $deletingProject) {
+                Button("Delete", role: .destructive) {
+                    let name = model.project
+                    Task { _ = await API.post("projects/rename", ["old": name, "new": ""]); model.refresh(full: true) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its sources stay, with no project.")
+            }
+            .task { projectOrder = (await API.get("settings"))?["project_order"] as? String ?? "created" }
             .help("Switch project")
                 .accessibilityLabel("Project: \(model.project.isEmpty ? "No project" : model.project). Switch project")
             .buttonStyle(.plain)

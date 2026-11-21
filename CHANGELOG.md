@@ -2,6 +2,16 @@
 
 What changed in each release of Referee, newest first. Releases are numbered (`v1.0.0`), and downloaded copies of Referee for Mac update themselves to the latest one.
 
+## 1.1.4 (21 November 2026, `v1.1.4`)
+
+- **Tasks carry more detail for your to-do app.** A task's Details set its deadline and when you plan to do it (Todoist's date, Things' When), which can repeat, apart from each other, as Todoist does; and its duration, priority (P1 red, P2 orange, P3 blue, or none), labels, section, the flag, and reminders (minutes before, or arriving at or leaving a place, picked with the Mac's map search). Each app takes what it has: Todoist all of it (reminders at a place need Todoist Pro), Things the date and tags, Reminders priority, the flag and a remind-me time, and Notion priority and labels when the database has those columns. What an app can't hold is written into the task's notes. The same Details are in the Calendar's new task, under More.
+- **"By when" is called Deadline**, everywhere a task has one, and tasks from the Calendar have a deadline and duration too.
+- **Drag and drop into the Library**: drop PDFs, pictures of pages, links or YouTube videos to add them to the project the Library is showing (or the current one, showing all reading).
+- **The Library opens on the current project**, not on all reading. Choosing another, or all reading, stays chosen.
+- **The project title has two menus**: a click lists the projects to switch between, with New project and the archived ones; a right-click has the current project's options (due date, also cite from, rename, archive, delete) and Sort projects. Their names are in sentence case.
+- **Saved pages no longer take a cited paper's details.** A page with no DOI of its own (a GitHub repository whose README cites a paper, say) took the first DOI in its text and with it that paper's title, authors and journal. Only the source's own DOI counts now: in its citation tags, in its link, or on a PDF's first page.
+- A source's citation details can now clear a wrong DOI and make its citation key again.
+
 ## 1.1.3 (17 November 2026, `v1.1.3`)
 
 - **Settings has a sidebar**, like System Settings, with a page for each part: General, Checks, Reading, Writing, Integrations, and Privacy and help. The keyboard shortcuts are together under General. Under Writing, each writing app (Word, Google Docs, Overleaf, Obsidian, and R Markdown and Quarto) has a page of its own, so its settings are no longer behind a "Writing in" menu.

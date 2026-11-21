@@ -143,6 +143,45 @@ def due_of(task_id: str) -> Optional[str]:
 REPEATS = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
 
 
+def due_fields(date: Optional[str], at: Optional[str], repeat: str = "never", repeat_text: str = "") -> Dict:
+    """A Todoist task's date: none, a day, a day and time, or repeating from a day."""
+    if not date:
+        return {"due_string": "no date"}
+    if repeat in REPEATS:
+        day = datetime.strptime(date, "%Y-%m-%d")
+        return {"due_string": f"every {REPEATS[repeat]} starting {day.strftime('%b')} {day.day} {day.year}" + (f" at {at}" if at else ""),
+                "due_lang": "en"}
+    if repeat == "custom" and repeat_text:
+        return {"due_string": repeat_text}
+    if at:
+        return {"due_datetime": f"{date}T{at}:00"}
+    return {"due_date": date}
+
+
+def add_reminders(task_id: str, reminders: List[Dict], key: str) -> List[str]:
+    """Todoist reminders on a task, through its sync API: a number of minutes before it's due, or arriving at or
+    leaving a place (Todoist Pro). Returns the ones Todoist refused, described."""
+    import uuid
+    commands = []
+    for r in reminders:
+        if r.get("place") and r.get("lat") is not None:
+            args = {"item_id": task_id, "type": "location", "name": r["place"], "loc_lat": str(r["lat"]),
+                    "loc_long": str(r["lon"]), "loc_trigger": "on_enter" if r.get("arriving", True) else "on_leave", "radius": 150}
+        elif r.get("minutes") is not None:
+            args = {"item_id": task_id, "type": "relative", "minute_offset": int(r["minutes"])}
+        else:
+            continue
+        commands.append({"type": "reminder_add", "temp_id": uuid.uuid4().hex, "uuid": uuid.uuid4().hex, "args": args})
+    if not commands:
+        return []
+    response = _call("POST", "sync", key, json={"commands": commands})
+    if not response.ok:
+        return ["reminders (Todoist answered %d)" % response.status_code]
+    status = response.json().get("sync_status", {})
+    return [c["args"].get("name") or f"{c['args'].get('minute_offset')} minutes before" for c in commands
+            if status.get(c["uuid"]) not in ("ok", None)]
+
+
 def _pages(path: str, key: str) -> List[Dict]:
     found, cursor = [], None
     while True:
@@ -216,19 +255,11 @@ def save_task(body: Dict) -> Dict:
             "priority": 5 - int(body.get("priority") or 4), "labels": body.get("labels") or []}
     if body.get("project_id") and not body.get("id"):
         task["project_id"] = body["project_id"]
-    date, at, repeat = body.get("date"), body.get("time"), body.get("repeat") or "never"
-    if not date:
-        task["due_string"] = "no date"
-    elif repeat in REPEATS:
-        day = datetime.strptime(date, "%Y-%m-%d")
-        task["due_string"] = f"every {REPEATS[repeat]} starting {day.strftime('%b')} {day.day} {day.year}" + (f" at {at}" if at else "")
-        task["due_lang"] = "en"
-    elif repeat == "custom" and body.get("repeat_text"):
-        task["due_string"] = body["repeat_text"]
-    elif at:
-        task["due_datetime"] = f"{date}T{at}:00"
-    else:
-        task["due_date"] = date
+    task.update(due_fields(body.get("date"), body.get("time"), body.get("repeat") or "never", body.get("repeat_text") or ""))
+    if body.get("deadline"):
+        task["deadline_date"] = body["deadline"]
+    if body.get("duration") and body.get("date"):
+        task.update(duration=int(body["duration"]), duration_unit="minute")
     try:
         sent = _call("POST", f"tasks/{body['id']}" if body.get("id") else "tasks", key, json=task)
         sent.raise_for_status()

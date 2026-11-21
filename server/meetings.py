@@ -137,6 +137,10 @@ class Meetings:
             "actions": [{"id": a.get("id") or uuid.uuid4().hex, "text": (a.get("text") or "").strip(),
                          "who": (a.get("who") or "").strip(), "due": (a.get("due") or "").strip(), "done": bool(a.get("done")),
                          "notes": a.get("notes") or "",
+                         # More about the task for the to-do app (tasks.py DETAILS): when to work on it, priority,
+                         # labels, reminders and so on. Only what's set is kept.
+                         **({"details": {k: v for k, v in a["details"].items() if v not in (None, "", [], False)}}
+                            if isinstance(a.get("details"), dict) else {}),
                          "send_files": [f for f in a.get("send_files") or [] if isinstance(f, str) and "/" not in f],
                          **self._todoist(meeting.get("id"), a)}
                         for a in meeting.get("actions") or []],

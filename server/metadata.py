@@ -21,17 +21,26 @@ ARXIV = re.compile(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", re.IGNORECASE)
 TIMEOUT = 6
 
 
-def find_doi(url: str, text: str = "") -> Optional[str]:
+def find_doi(url: str, text: str = "", pdf: bool = False) -> Optional[str]:
 
     """
-    The DOI for a source: an arXiv link's DOI, a citation tag in the page, or the first DOI in its text.
+    The source's own DOI: an arXiv link's, one in the link itself (doi.org/...), a citation tag in the page,
+    or, for a PDF, the first DOI on its first page, where a paper prints its own. A DOI anywhere else in a
+    page is a citation of something else (a README citing a paper), so it isn't used: the page would take
+    that paper's title and authors.
     """
 
     arxiv = ARXIV.search(url or "")
     if arxiv:
         return f"10.48550/arXiv.{arxiv.group(1)}"
-    for pattern in (META_DOI, DOI):
-        found = pattern.search(text or "")
+    in_link = DOI.search(requests.utils.unquote(url or ""))
+    if in_link:
+        return in_link.group(1).strip()
+    tagged = META_DOI.search(text or "")
+    if tagged:
+        return tagged.group(1).strip()
+    if pdf:
+        found = DOI.search((text or "")[:3000])
         if found:
             return found.group(1).strip()
     return None
@@ -87,13 +96,13 @@ def retracted(doi: str) -> bool:
     return any(u.get("type") == "retraction" for u in updates)
 
 
-def enrich(metadata: Dict, text: str = "") -> Dict:
+def enrich(metadata: Dict, text: str = "", pdf: bool = False) -> Dict:
 
     """
     Fills in the metadata from the source's DOI, if it has one. Returns the same dictionary.
     """
 
-    doi = find_doi(metadata.get("url") or "", text)
+    doi = find_doi(metadata.get("url") or "", text, pdf)
     if not doi:
         return metadata
     details = lookup(doi)

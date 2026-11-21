@@ -14,6 +14,7 @@ struct Meeting: Codable, Identifiable, Equatable {
         var done = false
         var notes: String? = nil   // optional, so action points saved before notes still read
         var send_files: [String]? = nil   // meeting attachments to send with its Todoist task
+        var details: TaskDetails? = nil    // when to do it, priority, labels, reminders and so on, for the to-do app
     }
 
     var id = UUID().uuidString
@@ -482,8 +483,9 @@ struct MeetingEditor: View {
                             }
                             // No "who": action points are yours (blank counts as you, and goes to your to-do app).
                             HStack(spacing: 18) {
-                                Label { TextField("By when", text: $action.due).textFieldStyle(.plain) } icon: { Image(systemName: "calendar") }
+                                Label { TextField("Deadline", text: $action.due).textFieldStyle(.plain) } icon: { Image(systemName: "calendar") }
                                     .frame(maxWidth: 200, alignment: .leading)
+                                TaskDetailsButton(details: $action.details, due: $action.due)
                                 // Which of the meeting's attachments go to this task in Todoist.
                                 if let files = meeting.files, !files.isEmpty {
                                     Menu {

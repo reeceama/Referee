@@ -246,6 +246,7 @@ class MoveRequest(BaseModel):
 
 class CaptureUrlRequest(BaseModel):
     url: str
+    project: str = ""   # which project it's added to (the Library's, when dropped there); else the current one
 
 
 class FeedbackRequest(BaseModel):
@@ -308,7 +309,7 @@ def capture_pdf(req: CapturePdfRequest):
         return {"ok": False, "reason": str(e)}
     if req.title and not metadata.get("title"):
         metadata["title"] = req.title
-    enrich(metadata, " ".join(text for text, _ in passages[:5]))
+    enrich(metadata, " ".join(text for text, _ in passages[:5]), pdf=True)
     stamp(metadata, req.project)
     texts, pages = [text for text, _ in passages], [page for _, page in passages]
     # PDF text scrambles maths: use the paper's LaTeX or HTML version when there is one.
@@ -812,7 +813,8 @@ todoist_sync.start()
 
 @app.get("/tasks")
 def tasks_status():
-    return todoist_sync.status()
+    # Also which task details the chosen app takes.
+    return {**todoist_sync.status(), "fields": tasks.fields(tasks.chosen_app()), "reminders_to": tasks.reminders_to()}
 
 
 @app.post("/tasks")
@@ -1571,6 +1573,7 @@ def clear_store():
 class AddPdfRequest(BaseModel):
     name: str
     data: str  # the PDF file, base64-encoded
+    project: str = ""   # as for CaptureUrlRequest
 
 
 # --- Adding sources by hand (the Mac app's Add Source): saved straight into the current
@@ -1595,7 +1598,7 @@ def add_url(req: CaptureUrlRequest):
         else:
             result = capture(CaptureRequest(url=url, html=response.text))
     if result.get("ok"):
-        keep(url, reading.project or None)
+        keep(url, req.project or reading.project or None)
     return result
 
 
@@ -1621,10 +1624,14 @@ def source_details(body: dict):
     # Citation details for sources that lack them (lecture notes, reports): title, authors
     # ("Surname, First; ..."), date (year or YYYY-MM-DD) and publisher or institution.
     url = body.get("url", "")
-    fields = {k: (body.get(k) or "").strip() or None for k in ("title", "author", "date", "site") if k in body}
+    # "doi" too, so a wrong one (an earlier version took a page's citation of a paper as its own) can be cleared.
+    fields = {k: (body.get(k) or "").strip() or None for k in ("title", "author", "date", "site", "doi") if k in body}
     if "title" in fields and not fields["title"]:
         return {"ok": False, "reason": "A title can't be empty."}
-    if not update_source(url, {**fixed_key(url), **fields}):
+    # "new_key": true lets its \cite key be made again from the corrected details, for a source not yet cited
+    # under its old one; otherwise the key stays, so citations already written still work.
+    keep = {"cite_key": None, "cite_key_fixed": False} if body.get("new_key") else fixed_key(url)
+    if not update_source(url, {**keep, **fields}):
         return {"ok": False, "reason": "That source isn't saved."}
     return {"ok": True}
 
@@ -1678,7 +1685,7 @@ def add_pdf(req: AddPdfRequest):
         return add_image(req.name, base64.b64decode(req.data))
     result = capture_pdf(CapturePdfRequest(url=url, title=Path(req.name).stem, data=req.data))
     if result.get("ok"):
-        keep(url, reading.project or None)
+        keep(url, req.project or reading.project or None)
     return result
 
 

@@ -18,6 +18,7 @@ final class LibraryModel: ObservableObject {
     @Published var projectOrder = "created"
     @Published var references: [String] = []
     @Published var filter = "all"            // "all", "none" or a project name
+    private var followed = false              // the current project chosen as the filter once, when first loaded
     @Published var document = ""              // References for one document ("" for all of them)
     @Published var style = WordSettings.style
     @Published var search = ""
@@ -37,6 +38,8 @@ final class LibraryModel: ObservableObject {
                 links = settings["links"] as? [String: [String]] ?? [:]
                 archived = settings["archived"] as? [String] ?? []
             }
+            // Opens on the current project, as Notes does; once chosen by hand (All Reading, say), the choice stays.
+            if !followed && !current.isEmpty { filter = current; followed = true }
             if filter != "all" && filter != "none" && !projects.contains(filter) { filter = "all" }
             audits = LibraryModel.findings(await API.get("audit") ?? [:])
             warnings = LibraryModel.findings(await API.get("warnings") ?? [:])
@@ -211,6 +214,10 @@ struct LibraryView: View {
     @State private var renameTo = ""
     @State private var armed: String?           // a saved source or project waiting for its second click
     @State private var confirmEverything = ""
+    /// Drag and drop: a drag over the Library, what's being added, and any that couldn't be.
+    @State private var dropping = false
+    @State private var adding: [String] = []
+    @State private var dropProblems: [String] = []
     @State private var copied = false
     @State private var forgetting: String?
     @State private var lastDocument = UserDefaults.standard.string(forKey: "lastEvidenceDocument") ?? ""
@@ -228,10 +235,37 @@ struct LibraryView: View {
                     findingsList(library.warnings)
                 }
             } else {
+                if !adding.isEmpty {
+                    Label("Adding \(adding.count): " + adding.joined(separator: ", "), systemImage: "arrow.down.circle")
+                        .font(Scaled.style(12, .regular)).foregroundStyle(.secondary).padding(.top, 14)
+                }
+                ForEach(dropProblems, id: \.self) { problem in
+                    Text(problem).font(Scaled.style(12, .regular)).foregroundStyle(.red).padding(.top, 6)
+                }
                 readingList
                 forgetEverything.padding(.top, 36)
             }
         }
+        .overlay {
+            if dropping {
+                VStack(spacing: 6) {
+                    Image(systemName: "arrow.down.doc").font(.system(size: 26)).foregroundStyle(Color.accentColor)
+                    Text("Drop to add to \(dropProject.isEmpty ? "no project" : dropProject)").font(Scaled.style(14, .medium))
+                    Text("PDFs, links, and YouTube videos").font(Scaled.style(12, .regular)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Covers the list, so its text doesn't show through the message.
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.94), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6])))
+                .padding(12)
+                .allowsHitTesting(false)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            drop(urls)
+            return !urls.isEmpty
+        } isTargeted: { dropping = $0 }
         .onAppear { library.load() }
         // Choosing a document in the sidebar shows its references here.
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
@@ -245,6 +279,40 @@ struct LibraryView: View {
         } }
         .sheet(isPresented: Binding(get: { library.report != nil }, set: { if !$0 { library.report = nil } })) {
             if let report = library.report { ReportView(title: report.title, html: report.html, trailProject: report.trailProject) }
+        }
+    }
+
+    // MARK: Drag and drop
+
+    /// Where dropped sources go: the project the Library is showing, or the current one when it shows all reading.
+    private var dropProject: String {
+        library.filter == "all" || library.filter == "none" ? library.current : library.filter
+    }
+
+    /// Each dropped file (a PDF, or a picture of a page) or link (a page, PDF link or YouTube video), added in turn.
+    private func drop(_ urls: [URL]) {
+        let project = dropProject
+        dropProblems = []
+        for url in urls {
+            let name = url.isFileURL ? url.lastPathComponent : (url.host ?? "") + url.path
+            adding.append(name)
+            Task {
+                let result: [String: Any]?
+                if url.isFileURL {
+                    if let data = try? Data(contentsOf: url) {
+                        result = await API.post("sources/add-pdf", ["name": url.path, "data": data.base64EncodedString(), "project": project], timeout: 600)
+                    } else {
+                        result = ["ok": false, "reason": "Couldn't open it."]
+                    }
+                } else {
+                    result = await API.post("sources/add-url", ["url": url.absoluteString, "project": project], timeout: 120)
+                }
+                adding.removeAll { $0 == name }
+                if result?["ok"] as? Bool != true {
+                    dropProblems.append("\(name): " + (result?["reason"] as? String ?? "Referee didn't finish reading it in time. It may still have been added."))
+                }
+                library.load()
+            }
         }
     }
 
@@ -622,7 +690,8 @@ struct ProjectPopover: View {
     let close: () -> Void
     let setDue: () -> Void     // the due date opens as a sheet: the popover kept its first size and cut it off
     @StateObject private var library = LibraryModel()
-    private enum Step { case list, new, rename, citeFrom }
+    enum Step { case list, new, rename, citeFrom }
+    var start = Step.list
     @State private var step = Step.list
     @State private var name = ""
     @State private var deleting = false
@@ -638,7 +707,11 @@ struct ProjectPopover: View {
         }
         .padding(8)
         .frame(minWidth: 240)
-        .onAppear { library.load() }
+        .onAppear {
+            library.load()
+            step = start
+            if start == .rename { name = current }
+        }
         .confirmationDialog("Delete “\(current)”?", isPresented: $deleting) {
             Button("Delete", role: .destructive) { library.rename(current, to: ""); close() }
             Button("Cancel", role: .cancel) {}
@@ -681,30 +754,7 @@ struct ProjectPopover: View {
             .frame(maxHeight: Scaled.s(27) * 9)
             .fixedSize(horizontal: false, vertical: found.count < 9)
             Divider().padding(.vertical, 4)
-            row("New Project") { name = search; step = .new }
-            if !current.isEmpty {
-                // The current project's own actions, folded into one row.
-                fold("Project options", open: $showActions)
-                if showActions {
-                    Group {
-                        row("Due Date") { close(); setDue() }
-                        if all.count > 1 { row("Also Cite From") { step = .citeFrom } }
-                        row("Rename") { name = current; step = .rename }
-                        row("Archive Project") { library.archive(current, true); close() }
-                        row("Delete Project", destructive: true) { deleting = true }
-                    }
-                    .padding(.leading, 14)
-                }
-            }
-            // How projects are listed here and in every other list of them.
-            fold("Sort projects", open: $showOrder)
-            if showOrder {
-                Group {
-                    row("By name", check: library.projectOrder == "name") { library.setProjectOrder("name") }
-                    row("By date created", check: library.projectOrder != "name") { library.setProjectOrder("created") }
-                }
-                .padding(.leading, 14)
-            }
+            row("New project") { name = search; step = .new }
             if !library.archived.isEmpty {
                 Divider().padding(.vertical, 4)
                 // Folded away until opened, so archived projects aren't one click from being brought back.

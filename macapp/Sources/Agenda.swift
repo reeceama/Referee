@@ -539,6 +539,8 @@ struct AddToDay: View {
     @State private var project = ""
     @State private var name = ""
     @State private var day = Date()
+    @State private var details = TaskDetails()
+    @State private var more = false
     @State private var timed = false
     @State private var time = Calendar.current.date(bySettingHour: 17, minute: 0, second: 0, of: Date()) ?? Date()
     @Environment(\.dismiss) private var dismiss
@@ -548,12 +550,16 @@ struct AddToDay: View {
             Text(deadline ? "New deadline" : "New task").font(Scaled.style(13, .semibold))
             TextField(deadline ? "Name" : "Task", text: $name).textFieldStyle(.roundedBorder)
             Picker("Project", selection: $project) { ForEach(projects, id: \.self) { Text($0).tag($0) } }
-            DatePicker(deadline ? "Due" : "By", selection: $day, displayedComponents: .date)
+            DatePicker("Deadline", selection: $day, displayedComponents: .date)
             if deadline {
                 HStack {
                     Toggle("Time", isOn: $timed)
                     if timed { DatePicker("", selection: $time, displayedComponents: .hourAndMinute).labelsHidden() }
                 }
+            }
+            if !deadline {
+                DisclosureGroup("More", isExpanded: $more) { TaskDetailsEditor(details: $details).padding(.top, 6) }
+                    .font(Scaled.style(12, .regular))
             }
             HStack {
                 Spacer()
@@ -563,7 +569,7 @@ struct AddToDay: View {
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || project.isEmpty)
             }
         }
-        .padding(18).frame(width: 340)
+        .padding(18).frame(width: more ? 460 : 340)
         .task {
             day = date
             let settings = await API.get("settings")
@@ -591,6 +597,7 @@ struct AddToDay: View {
         }()
         var action = Meeting.Action()
         (action.text, action.due) = (text, format.string(from: day))
+        if !details.isEmpty { action.details = details }
         list.actions.append(action)
         if let body = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(list)) as? [String: Any] {
             _ = await API.post("meetings", body)
@@ -618,6 +625,8 @@ struct TodoistTaskEditor: View {
     @State private var timed = false
     @State private var time = Date()
     @State private var repeatEvery = "never"
+    @State private var deadline: Date?
+    @State private var duration = 0
     @State private var priority = 4
     @State private var projectID = ""
     @State private var labels = ""
@@ -640,6 +649,19 @@ struct TodoistTaskEditor: View {
                     DatePicker("", selection: $date, displayedComponents: .date).labelsHidden()
                     Toggle("Time", isOn: $timed)
                     if timed { DatePicker("", selection: $time, displayedComponents: .hourAndMinute).labelsHidden() }
+                }
+                Spacer()
+            }
+            HStack(spacing: 10) {
+                Toggle("Deadline", isOn: Binding(get: { deadline != nil }, set: { deadline = $0 ? (deadline ?? date) : nil }))
+                if let chosen = deadline {
+                    DatePicker("", selection: Binding(get: { chosen }, set: { deadline = $0 }), displayedComponents: .date).labelsHidden()
+                }
+                if dated {
+                    Picker("Duration", selection: $duration) {
+                        Text("None").tag(0)
+                        ForEach([15, 30, 45, 60, 90, 120, 180], id: \.self) { m in Text(m % 60 == 0 ? "\(m / 60) h" : "\(m) min").tag(m) }
+                    }.fixedSize()
                 }
                 Spacer()
             }
@@ -701,6 +723,8 @@ struct TodoistTaskEditor: View {
         if let at = task["time"] as? String, let t = Self.clock.date(from: at) { timed = true; time = t }
         repeatEvery = task["repeat"] as? String ?? "never"
         priority = task["priority"] as? Int ?? 4
+        deadline = (task["deadline"] as? String).flatMap(Self.day.date(from:))
+        duration = task["duration"] as? Int ?? 0
         labels = (task["labels"] as? [String] ?? []).joined(separator: ", ")
         projectID = task["project_id"] as? String
             ?? projects.first { $0["name"] as? String == project }?["id"] as? String
@@ -732,6 +756,8 @@ struct TodoistTaskEditor: View {
         if let id = task["id"] { body["id"] = id }
         if dated { body["date"] = Self.day.string(from: date) }
         if dated && timed { body["time"] = Self.clock.string(from: time) }
+        if let deadline { body["deadline"] = Self.day.string(from: deadline) }
+        if dated && duration > 0 { body["duration"] = duration }
         Task {
             let sent = await API.post("todoist/task", body, timeout: 30)
             busy = false

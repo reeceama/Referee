@@ -104,7 +104,7 @@ def _columns(schema: Dict) -> Dict[str, Optional[tuple]]:
     The database's columns Referee uses: {"title", "done", "due", "project"} -> (name, type).
     """
 
-    found: Dict[str, Optional[tuple]] = {"title": None, "done": None, "due": None, "project": None}
+    found: Dict[str, Optional[tuple]] = {"title": None, "done": None, "due": None, "project": None, "priority": None, "labels": None}
     for name, prop in schema.get("properties", {}).items():
         kind = prop.get("type")
         if kind == "title":
@@ -115,6 +115,10 @@ def _columns(schema: Dict) -> Dict[str, Optional[tuple]]:
             found["due"] = (name, kind)
         elif name.lower() == "project" and kind in ("select", "rich_text"):
             found["project"] = (name, kind)
+        elif name.lower() == "priority" and kind in ("select", "status", "number"):
+            found["priority"] = (name, kind)
+        elif name.lower() in ("labels", "tags") and kind == "multi_select":
+            found["labels"] = (name, kind)
     return found
 
 
@@ -152,9 +156,20 @@ class Tasks:
                                       else {"rich_text": [{"text": {"content": project}}]})
         return props
 
-    def create(self, text: str, notes: str, due: Optional[datetime], project: str) -> str:
+    def _details(self, details: Optional[Dict]) -> Dict:
+        """Priority and labels, in a "Priority" column (select: "P1" to "P4", or a number) and a "Labels" or
+        "Tags" column, when the database has them."""
+        c, props, details = self.columns, {}, details or {}
+        if c.get("priority") and details.get("priority"):
+            p = int(details["priority"])
+            props[c["priority"][0]] = {"number": p} if c["priority"][1] == "number" else {c["priority"][1]: {"name": f"P{p}"}}
+        if c.get("labels") and details.get("labels"):
+            props[c["labels"][0]] = {"multi_select": [{"name": l} for l in details["labels"]]}
+        return props
+
+    def create(self, text: str, notes: str, due: Optional[datetime], project: str, details: Optional[Dict] = None) -> str:
         key, db = self._ready()
-        body = {"parent": {"database_id": db}, "properties": self._properties(text, due, project),
+        body = {"parent": {"database_id": db}, "properties": {**self._properties(text, due, project), **self._details(details)},
                 "children": [{"object": "block", "type": "paragraph",
                               "paragraph": {"rich_text": [{"text": {"content": notes}}]}}]}
         response = _call("POST", "pages", key, json=body)
@@ -176,6 +191,6 @@ class Tasks:
         key, _ = self._ready()
         _call("PATCH", f"pages/{task_id}", key, json={"properties": {self.columns["done"][0]: {"checkbox": True}}}).raise_for_status()
 
-    def update(self, task_id: str, text: str, due: Optional[datetime]) -> None:
+    def update(self, task_id: str, text: str, due: Optional[datetime], details: Optional[Dict] = None) -> None:
         key, _ = self._ready()
-        _call("PATCH", f"pages/{task_id}", key, json={"properties": self._properties(text, due)}).raise_for_status()
+        _call("PATCH", f"pages/{task_id}", key, json={"properties": {**self._properties(text, due), **self._details(details)}}).raise_for_status()

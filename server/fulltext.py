@@ -199,7 +199,7 @@ def find(url: str, pdf_text: str, title: Optional[str] = None, doi: Optional[str
     if identifier:
         attempts += [(lambda: _arxiv_source(identifier), "arXiv LaTeX source"),
                      (lambda: _html(f"https://arxiv.org/html/{identifier}"), "arXiv HTML")]
-    doi = doi or find_doi(url, pdf_text[:20000])
+    doi = doi or find_doi(url, pdf_text[:20000], pdf=True)
     if doi and not doi.lower().startswith("10.48550/"):
         attempts.append((lambda: _html(f"https://doi.org/{doi}"), "publisher's page"))
     for attempt, where in attempts:

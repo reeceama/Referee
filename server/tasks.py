@@ -31,6 +31,51 @@ CONFIG = Path.home() / ".referee" / "config.json"
 EVERY = 180  # seconds between syncs; a meeting change syncs straight away
 APPS = ("things", "reminders", "todoist", "notion")
 
+# A task's details (an action point's "details"), beyond its text, notes and "by when" (its deadline):
+#     date, time, repeat:  when to work on it (repeat: daily, weekly, monthly or yearly)
+#     duration:            minutes
+#     priority:            1 (highest) to 4
+#     labels:              names (tags in Things)
+#     section:             a section in the project (Todoist)
+#     flagged:             Apple Reminders' flag
+#     reminders:           [{"minutes": before it's due} or {"place", "lat", "lon", "arriving": true or false}]
+# Each app takes what it has (FIELDS); the rest isn't sent. Reminders go to the to-do app, or to Referee's
+# calendar as alerts (where Fantastical and Apple Calendar show them), as chosen in Settings.
+FIELDS = {
+    "todoist": ["date", "time", "repeat", "duration", "priority", "labels", "section", "reminders", "places"],
+    "things": ["date", "labels"],
+    "reminders": ["priority", "flagged", "reminders"],
+    "notion": ["priority", "labels"],
+}
+
+
+def reminders_to() -> str:
+    """Where a task's reminders go: "app" (the to-do app) or "calendar" (alerts in Referee's calendar)."""
+    try:
+        return json.loads(CONFIG.read_text(encoding="utf-8")).get("task_reminders") or "app"
+    except (OSError, ValueError):
+        return "app"
+
+
+def fields(app: Optional[str]) -> list:
+    """The details an app takes. With reminders going to the calendar, every app has them, places included."""
+    found = list(FIELDS.get(app or "", []))
+    if reminders_to() == "calendar":
+        found = [f for f in found if f not in ("reminders", "places")] + ["reminders", "places"]
+        found += [f for f in ("date", "time") if f not in found]   # a reminder needs a time to count back from
+    return found
+
+
+def _when(details: Dict, due: Optional[datetime]) -> Optional[datetime]:
+    """The moment a task's reminders count back from: its date and time, else its deadline at 9:00."""
+    day = details.get("date")
+    if day:
+        try:
+            return datetime.strptime(f"{day} {details.get('time') or '09:00'}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            return None
+    return due.replace(hour=9, minute=0) if due else None
+
 
 def chosen_app() -> Optional[str]:
 
@@ -94,8 +139,10 @@ end dateFrom
 
 class Things:
 
-    def create(self, text: str, notes: str, due: Optional[datetime], project: str) -> str:
-        return _osascript(DATE_FROM_TEXT + """
+    # Things: its deadline is the action point's "by when"; the date is when it shows in Today ("when"); labels
+    # are tags.
+    def create(self, text: str, notes: str, due: Optional[datetime], project: str, details: Optional[Dict] = None) -> str:
+        task_id = _osascript(DATE_FROM_TEXT + """
 on run argv
     set {theName, theNotes, theDue, theProject} to argv
     tell application "Things3"
@@ -107,6 +154,22 @@ on run argv
         return id of t
     end tell
 end run""", text, notes, _applescript_date(due), project)
+        self._details(task_id, details or {})
+        return task_id
+
+    def _details(self, task_id: str, details: Dict) -> None:
+        when = _when({"date": details.get("date"), "time": "09:00"}, None) if details.get("date") else None
+        if not (details.get("labels") or when):
+            return
+        _osascript(DATE_FROM_TEXT + """
+on run argv
+    tell application "Things3"
+        set t to to do id (item 1 of argv)
+        if item 2 of argv is not "" then set tag names of t to item 2 of argv
+        set d to my dateFrom(item 3 of argv)
+        if d is not missing value then schedule t for d
+    end tell
+end run""", task_id, ", ".join(details.get("labels") or []), _applescript_date(when))
 
     def state(self, task_id: str) -> Optional[bool]:
         """True if done, False if open, None if it's gone."""
@@ -119,7 +182,7 @@ end run""", text, notes, _applescript_date(due), project)
     def complete(self, task_id: str) -> None:
         _osascript('on run argv\ntell application "Things3" to set status of to do id (item 1 of argv) to completed\nend run', task_id)
 
-    def update(self, task_id: str, text: str, due: Optional[datetime]) -> None:
+    def update(self, task_id: str, text: str, due: Optional[datetime], details: Optional[Dict] = None) -> None:
         _osascript(DATE_FROM_TEXT + """
 on run argv
     tell application "Things3"
@@ -129,12 +192,15 @@ on run argv
         if d is not missing value then set due date of t to d
     end tell
 end run""", task_id, text, _applescript_date(due))
+        self._details(task_id, details or {})
 
 
 class Reminders:
 
-    def create(self, text: str, notes: str, due: Optional[datetime], project: str) -> str:
-        return _osascript(DATE_FROM_TEXT + """
+    # Apple Reminders: priority (high, medium, low), the flag, and a remind-me time (the first reminder given in
+    # minutes before the deadline; places aren't open to scripts, so those go to the calendar instead).
+    def create(self, text: str, notes: str, due: Optional[datetime], project: str, details: Optional[Dict] = None) -> str:
+        task_id = _osascript(DATE_FROM_TEXT + """
 on run argv
     set {theName, theNotes, theDue, theList} to argv
     if theList is "" then set theList to "Referee"
@@ -146,6 +212,28 @@ on run argv
         return id of r
     end tell
 end run""", text, notes, _applescript_date(due), project)
+        self._details(task_id, details or {}, due)
+        return task_id
+
+    def _details(self, task_id: str, details: Dict, due: Optional[datetime]) -> None:
+        from datetime import timedelta
+        priority = {1: "1", 2: "5", 3: "9"}.get(details.get("priority") or 4, "0")
+        remind = None
+        if reminders_to() == "app":
+            minutes = next((r["minutes"] for r in details.get("reminders") or [] if r.get("minutes") is not None), None)
+            start = _when(details, due)
+            if minutes is not None and start:
+                remind = start - timedelta(minutes=int(minutes))
+        _osascript(DATE_FROM_TEXT + """
+on run argv
+    tell application "Reminders"
+        set r to reminder id (item 1 of argv)
+        set priority of r to (item 2 of argv) as integer
+        set flagged of r to ((item 3 of argv) is "true")
+        set d to my dateFrom(item 4 of argv)
+        if d is not missing value then set remind me date of r to d
+    end tell
+end run""", task_id, priority, "true" if details.get("flagged") else "false", _applescript_date(remind))
 
     def state(self, task_id: str) -> Optional[bool]:
         try:
@@ -157,7 +245,7 @@ end run""", text, notes, _applescript_date(due), project)
     def complete(self, task_id: str) -> None:
         _osascript('on run argv\ntell application "Reminders" to set completed of reminder id (item 1 of argv) to true\nend run', task_id)
 
-    def update(self, task_id: str, text: str, due: Optional[datetime]) -> None:
+    def update(self, task_id: str, text: str, due: Optional[datetime], details: Optional[Dict] = None) -> None:
         _osascript(DATE_FROM_TEXT + """
 on run argv
     tell application "Reminders"
@@ -167,6 +255,8 @@ on run argv
         if d is not missing value then set due date of r to d
     end tell
 end run""", task_id, text, _applescript_date(due))
+        if details:
+            self._details(task_id, details, due)
 
 
 class Todoist:
@@ -210,10 +300,38 @@ class Todoist:
 
     # An action point's "by when" is the task's deadline in Todoist (when it must be done), not its
     # due date (when to work on it): you schedule the work yourself in Todoist.
-    def create(self, text: str, notes: str, due: Optional[datetime], project: str) -> str:
-        body = {"content": text, "description": notes, "project_id": self._project(project or "Referee")}
+    def create(self, text: str, notes: str, due: Optional[datetime], project: str, details: Optional[Dict] = None) -> str:
+        project_id = self._project(project or "Referee")
+        body = {"content": text, "description": notes, "project_id": project_id, **self._fields(details or {}, project_id)}
         response = self._send("tasks", body, due)
         return response.json()["id"]
+
+    def _fields(self, details: Dict, project_id: Optional[str] = None) -> Dict:
+        """The details Todoist takes, only those set, so a date or priority set in Todoist itself isn't wiped."""
+        found: Dict = {}
+        if details.get("date"):
+            found.update(todoist.due_fields(details["date"], details.get("time"), details.get("repeat") or "never"))
+            if details.get("duration"):
+                found.update(duration=int(details["duration"]), duration_unit="minute")
+        if details.get("priority"):
+            found["priority"] = 5 - int(details["priority"])
+        if details.get("labels"):
+            found["labels"] = list(details["labels"])
+        if details.get("section") and project_id:
+            found["section_id"] = self._section(project_id, details["section"])
+        return found
+
+    def _section(self, project_id: str, name: str) -> str:
+        key = self._key()
+        listed = todoist._call("GET", "sections", key, params={"project_id": project_id}).json()
+        for section in listed.get("results", listed if isinstance(listed, list) else []):
+            if section.get("name", "").lower() == name.lower():
+                return section["id"]
+        return todoist._call("POST", "sections", key, json={"project_id": project_id, "name": name}).json()["id"]
+
+    def remind(self, task_id: str, reminders: list) -> list:
+        """Todoist's own reminders; returns any it refused (a place, without Todoist Pro)."""
+        return todoist.add_reminders(task_id, reminders, self._key())
 
     def _send(self, path: str, body: dict, due: Optional[datetime]):
         """
@@ -239,8 +357,14 @@ class Todoist:
     def complete(self, task_id: str) -> None:
         todoist._call("POST", f"tasks/{task_id}/close", self._key()).raise_for_status()
 
-    def update(self, task_id: str, text: str, due: Optional[datetime]) -> None:
-        self._send(f"tasks/{task_id}", {"content": text}, due)
+    def update(self, task_id: str, text: str, due: Optional[datetime], details: Optional[Dict] = None) -> None:
+        body = {"content": text, **self._fields({k: v for k, v in (details or {}).items() if k != "section"})}
+        self._send(f"tasks/{task_id}", body, due)
+        if (details or {}).get("section"):
+            task = todoist._call("GET", f"tasks/{task_id}", self._key()).json()
+            section = self._section(task["project_id"], details["section"])
+            if task.get("section_id") != section:
+                todoist._call("POST", f"tasks/{task_id}/move", self._key(), json={"section_id": section})
 
 
 BACKENDS = {"things": Things, "reminders": Reminders, "todoist": Todoist, "notion": notion.Tasks}
@@ -284,6 +408,53 @@ class Sync:
             changed.add(meeting.get("project") or "")
         action["files_sent"] = sorted(sent)
 
+    @staticmethod
+    def _details(app: str, action: Dict) -> Dict:
+        """The action point's details this app takes (reminders only when they go to the app)."""
+        allowed = set(FIELDS.get(app, [])) - (set() if reminders_to() == "app" else {"reminders"})
+        return {k: v for k, v in (action.get("details") or {}).items() if k in allowed or (k == "time" and "date" in allowed)}
+
+    @staticmethod
+    def _extra(app: str, details: Dict) -> str:
+        """The details this app has no place for, written out: "Priority: P1 · Duration: 45 min · Labels: group"."""
+        taken = set(FIELDS.get(app, [])) | {"submission", "time"} | ({"reminders"} if reminders_to() == "calendar" else set())
+        parts = []
+        if details.get("date") and "date" not in taken:
+            parts.append("Do on: " + details["date"] + (f" {details['time']}" if details.get("time") else ""))
+        if details.get("repeat") and "repeat" not in taken:
+            parts.append("Repeats: " + details["repeat"])
+        if details.get("duration") and "duration" not in taken:
+            parts.append(f"Duration: {details['duration']} min")
+        if details.get("priority") and "priority" not in taken:
+            parts.append(f"Priority: P{details['priority']}")
+        if details.get("labels") and "labels" not in taken:
+            parts.append("Labels: " + ", ".join(details["labels"]))
+        if details.get("section") and "section" not in taken:
+            parts.append("Section: " + details["section"])
+        if details.get("flagged") and "flagged" not in taken:
+            parts.append("Flagged")
+        if details.get("reminders") and "reminders" not in taken:
+            parts.append("Reminders: " + ", ".join(r.get("place") or f"{r.get('minutes')} min before" for r in details["reminders"]))
+        return " · ".join(parts)
+
+    @staticmethod
+    def _sent(text: str, due: str, details: Dict) -> list:
+        # As sent before details existed when there are none, so tasks sent then aren't all sent again.
+        return [text, due] + ([json.dumps(details, sort_keys=True)] if details else [])
+
+    def _remind(self, backend, action: Dict, details: Dict) -> None:
+        """Reminders the app takes as reminders of its own (Todoist's), each sent once."""
+        if not hasattr(backend, "remind") or not details.get("reminders"):
+            return
+        sent = action.get("reminders_sent") or []
+        new = [r for r in details["reminders"] if json.dumps(r, sort_keys=True) not in sent]
+        if not new:
+            return
+        refused = backend.remind(action["task_id"], new)
+        if refused:
+            self.last["error"] = "Todoist didn't take " + ", ".join(refused) + ". Reminders at a place need Todoist Pro."
+        action["reminders_sent"] = sent + [json.dumps(r, sort_keys=True) for r in new]
+
     def _loop(self) -> None:
 
         while True:
@@ -322,8 +493,14 @@ class Sync:
                     origin = (f"Added in Referee: referee://meeting/{meeting['id']}" if meeting.get("kind") == "tasks" else
                               f"From {meeting.get('title') or 'a meeting'} ({meeting.get('date')}): referee://meeting/{meeting['id']}")
                     notes = f"{action['notes'].strip()}\n\n{origin}" if (action.get("notes") or "").strip() else origin
-                    action["task_id"] = backend.create(action["text"], notes, due_date(due_text), project)
-                    action["task_app"], action["task_sent"] = app, [action["text"], due_text]
+                    # What the app can't hold, as a line in its notes, so nothing set in Referee is lost.
+                    extra = self._extra(app, action.get("details") or {})
+                    if extra:
+                        notes = f"{extra}\n\n{notes}"
+                    details = self._details(app, action)
+                    action["task_id"] = backend.create(action["text"], notes, due_date(due_text), project, details)
+                    action["task_app"], action["task_sent"] = app, self._sent(action["text"], due_text, details)
+                    self._remind(backend, action, details)
                     changed.add(meeting.get("project") or "")
                     self._send_files(backend, app, meeting, action, changed)
                     synced += 1
@@ -340,9 +517,11 @@ class Sync:
                     changed.add(meeting.get("project") or "")
                 elif action.get("done") and not done_there:
                     backend.complete(action["task_id"])
-                elif not action.get("done") and action.get("task_sent") != [action["text"], due_text]:
-                    backend.update(action["task_id"], action["text"], due_date(due_text))
-                    action["task_sent"] = [action["text"], due_text]
+                elif not action.get("done") and action.get("task_sent") != self._sent(action["text"], due_text, self._details(app, action)):
+                    details = self._details(app, action)
+                    backend.update(action["task_id"], action["text"], due_date(due_text), details)
+                    action["task_sent"] = self._sent(action["text"], due_text, details)
+                    self._remind(backend, action, details)
                     changed.add(meeting.get("project") or "")
         if changed:
             self.meetings._save(changed)  # also rewrites the workspace's who-did-what
